@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>235717104176-p4jletph7n1kdna2niihc7d5ubt0l80v.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.235717104176-p4jletph7n1kdna2niihc7d5ubt0l80v</string>
+	<key>API_KEY</key>
+	<string>AIzaSyC_9-18HvKBh6DEcaddjC5Ty6z7H_J-gJk</string>
+	<key>GCM_SENDER_ID</key>
+	<string>235717104176</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.example.attendanceKioskApp</string>
+	<key>PROJECT_ID</key>
+	<string>test-postgrace</string>
+	<key>STORAGE_BUCKET</key>
+	<string>test-postgrace.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:235717104176:ios:5c5a2640f96952c34713f5</string>
+</dict>
+</plist>

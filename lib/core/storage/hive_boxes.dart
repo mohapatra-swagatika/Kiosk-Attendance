@@ -1,0 +1,15 @@
+/// Centralized Hive box and key names.
+abstract final class HiveBoxes {
+  static const String app = 'app_box';
+}
+
+abstract final class HiveKeys {
+  static const String kioskConfig = 'kiosk_config';
+  static const String session = 'session';
+  static const String employees = 'employees';
+  static const String attendanceLogs = 'attendance_logs';
+  static const String deviceId = 'device_id';
+  static const String faceProfiles = 'face_profiles';
+  static const String syncQueue = 'sync_queue';
+  static const String syncMetadata = 'sync_metadata';
+}

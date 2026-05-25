@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "235717104176",
+    "project_id": "test-postgrace",
+    "storage_bucket": "test-postgrace.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:235717104176:android:422be71c704f16194713f5",
+        "android_client_info": {
+          "package_name": "com.example.attendance_kiosk_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "235717104176-bn6enlfda6phglbumrg5vtb9rhhot67g.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUULQGxpOOEKRoq7I6MoqRVHDSoYBQTt4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "235717104176-bn6enlfda6phglbumrg5vtb9rhhot67g.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
