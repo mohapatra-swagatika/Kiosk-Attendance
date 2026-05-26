@@ -1,7 +1,9 @@
-import 'package:attendance_kiosk_app/core/ml/face_embedding_codec.dart';
-import 'package:attendance_kiosk_app/core/ml/face_profile_poses.dart';
+import 'package:flutter/foundation.dart';
+
+import 'package:attendance_kiosk_app/core/api/employee_id_keys.dart';
+import 'package:attendance_kiosk_app/core/api/face_profile_parser.dart';
 import 'package:attendance_kiosk_app/core/api/kiosk_employee_snapshot_api.dart';
-import 'package:attendance_kiosk_app/features/employees/data/models/employee_model.dart';
+import 'package:attendance_kiosk_app/core/api/pair_organization_parser.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee_month_shift.dart';
 
@@ -13,7 +15,12 @@ class EmployeeSnapshotParser {
     final payload = _unwrapPayload(json);
     final employees = _parseEmployees(payload);
     final profiles = _parseFaceProfiles(payload);
-    return EmployeeSnapshotData(employees: employees, faceProfiles: profiles);
+    final organization = PairOrganizationParser.fromPairData(payload);
+    return EmployeeSnapshotData(
+      employees: employees,
+      faceProfiles: profiles,
+      organization: organization,
+    );
   }
 
   static Map<String, dynamic>? _unwrapPayload(Map<String, dynamic>? json) {
@@ -74,26 +81,31 @@ class EmployeeSnapshotParser {
   }
 
   static Employee? _parseEmployee(Map<String, dynamic> json) {
-    final id = _readString(json, const [
-      'id',
-      '_id',
-      'employeeId',
-      'employee_id',
-      'userId',
-      'user_id',
-      'uuid',
-    ]);
+    final id = _readString(json, EmployeeIdKeys.primary);
     if (id == null || id.isEmpty) return null;
 
-    final nestedProfile = _profileFromEmployeeJson(json);
-    final faceRegistered = _readBool(json, const [
-          'faceRegistered',
-          'face_registered',
-          'hasFace',
-          'hasFaceProfile',
-          'isFaceRegistered',
+    final nestedProfile = FaceProfileParser.fromEmployeeJson(json);
+    final faceRegistered =
+        nestedProfile != null || (_readBool(json, const [
+              'faceRegistered',
+              'face_registered',
+              'hasFace',
+              'hasFaceProfile',
+              'isFaceRegistered',
+            ]) ??
+            false);
+    final faceProfileHash = nestedProfile != null
+        ? FaceProfileParser.contentHash(nestedProfile)
+        : null;
+
+    final isAdmin = _readBool(json, const [
+          'isAdmin',
+          'is_admin',
+          'admin',
+          'isKioskAdmin',
+          'kiosk_admin',
         ]) ??
-        nestedProfile != null;
+        _roleIsAdmin(json['role'] ?? json['userRole'] ?? json['user_role']);
 
     return Employee(
       id: id,
@@ -107,8 +119,10 @@ class EmployeeSnapshotParser {
             'attendancePin',
             'employeePin',
           ]) ??
-          EmployeeModel.pinFallbackForId(id),
+          '',
       faceRegistered: faceRegistered,
+      faceProfileHash: faceProfileHash,
+      isAdmin: isAdmin,
       employeeCode: _readString(json, const [
         'employeeNumber',
         'employee_number',
@@ -252,83 +266,55 @@ class EmployeeSnapshotParser {
       for (final item in _extractEmployeeList(payload)) {
         final map = _asMap(item);
         if (map == null) continue;
-        final id = _readString(map, const [
-          'id',
-          '_id',
-          'employeeId',
-          'employee_id',
-          'userId',
-        ]);
-        final profile = _profileFromEmployeeJson(map);
-        if (id != null && profile != null) raw[id] = profile;
+        final profile = FaceProfileParser.fromEmployeeJson(map);
+        if (profile == null) continue;
+        for (final alias in _employeeIdAliases(map)) {
+          raw[alias] = profile;
+        }
       }
     }
 
     final valid = <String, Map<String, dynamic>>{};
     for (final entry in raw.entries) {
-      final normalized = _normalizeProfile(entry.value);
+      final normalized = FaceProfileParser.parse(entry.value);
       if (normalized != null) valid[entry.key] = normalized;
+    }
+
+    if (kDebugMode && valid.isNotEmpty) {
+      debugPrint(
+        '[EmployeeSnapshot] Parsed ${valid.length} face profile(s) from API',
+      );
     }
 
     return valid;
   }
 
-  static Map<String, dynamic>? _profileFromEmployeeJson(Map<String, dynamic> json) {
-    for (final key in const [
-      'faceProfile',
-      'face_profile',
-      'biometricProfile',
-      'biometric_profile',
-      'profile',
-      'embeddings',
-    ]) {
-      final profile = _normalizeProfile(json[key]);
+  /// Resolves a face profile for [employee] using id and common alias keys.
+  static Map<String, dynamic>? profileForEmployee(
+    Employee employee,
+    Map<String, Map<String, dynamic>> profiles,
+  ) {
+    for (final key in _employeeAliasKeys(employee)) {
+      final profile = profiles[key];
       if (profile != null) return profile;
     }
     return null;
   }
 
-  static Map<String, dynamic>? _normalizeProfile(Object? raw) {
-    final map = _asMap(raw);
-    if (map == null) return null;
-
-    final version = map['v'];
-    final v = version is int
-        ? version
-        : version is num
-            ? version.toInt()
-            : int.tryParse(version?.toString() ?? '');
-    if (v != FaceEmbeddingCodec.storageVersionTflite) return null;
-
-    final normalized = <String, dynamic>{'v': v};
-    for (final pose in FaceProfilePoses.matchKeys) {
-      final list = _coerceEmbeddingList(map[pose]);
-      if (list != null) normalized[pose] = list;
+  static Iterable<String> _employeeIdAliases(Map<String, dynamic> json) {
+    final keys = <String>{};
+    for (final field in EmployeeIdKeys.aliases) {
+      final v = _readString(json, [field]);
+      if (v != null && v.isNotEmpty) keys.add(v);
     }
-
-    final templates = map[FaceProfilePoses.templatesKey];
-    if (templates is List && templates.isNotEmpty) {
-      normalized[FaceProfilePoses.templatesKey] = templates;
-    }
-
-    final hasPose = FaceProfilePoses.required.any(normalized.containsKey);
-    if (!hasPose) return null;
-
-    return normalized;
+    return keys;
   }
 
-  static List<double>? _coerceEmbeddingList(Object? raw) {
-    if (raw is! List || raw.isEmpty) return null;
-    final out = <double>[];
-    for (final v in raw) {
-      if (v is num) {
-        out.add(v.toDouble());
-      } else {
-        return null;
-      }
-    }
-    if (out.length != FaceEmbeddingCodec.neuralEmbeddingDim) return null;
-    return out;
+  static Iterable<String> _employeeAliasKeys(Employee employee) sync* {
+    final keys = <String>{employee.id};
+    final code = employee.employeeCode?.trim();
+    if (code != null && code.isNotEmpty) keys.add(code);
+    yield* keys;
   }
 
   static Map<String, dynamic>? _asMap(Object? value) {
@@ -347,6 +333,15 @@ class EmployeeSnapshotParser {
       if (v is num) return v.toString();
     }
     return null;
+  }
+
+  static bool _roleIsAdmin(Object? role) {
+    if (role is! String) return false;
+    final normalized = role.trim().toLowerCase();
+    return normalized == 'admin' ||
+        normalized == 'administrator' ||
+        normalized == 'kiosk_admin' ||
+        normalized == 'kioskadmin';
   }
 
   static bool? _readBool(Map<String, dynamic>? json, List<String> keys) {

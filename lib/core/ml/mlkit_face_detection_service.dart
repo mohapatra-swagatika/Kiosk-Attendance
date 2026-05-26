@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -27,7 +27,7 @@ import 'package:attendance_kiosk_app/core/ml/mlkit_face_detector_factory.dart';
   return (width: frame.width, height: frame.height);
 }
 
-/// Shared ML Kit face detector for enrollment (accurate + tracking + contours).
+/// Shared ML Kit face detector for enrollment (fast stream + tracking).
 class MlKitEnrollmentFaceDetector {
   MlKitEnrollmentFaceDetector._() {
     _detector = MlKitFaceDetectorFactory.createEnrollment();
@@ -38,18 +38,38 @@ class MlKitEnrollmentFaceDetector {
 
   late final FaceDetector _detector;
   bool _closed = false;
-  bool _warmedUp = false;
+  bool _modelPrimed = false;
 
-  /// Marks detector ready without a dummy frame.
+  bool get isModelPrimed => _modelPrimed;
+
+  /// Loads the native ML model using a still frame **before** the live stream.
   ///
-  /// Calling [FaceDetector.processImage] with a 2×2 buffer on iOS can block the
-  /// main thread for 15–20s (watchdog "Hang detected"). The first live camera
-  /// frame primes the model instead.
-  Future<void> warmUp() async {
-    if (_warmedUp || _closed) return;
-    _warmedUp = true;
+  /// Run while the UI shows "Preparing camera" so the first stream frame does
+  /// not block the preview for 15–20s (iOS accurate-mode first inference).
+  Future<void> primeFromFile(String path) async {
+    if (_modelPrimed || _closed) return;
+    final file = File(path);
+    if (!await file.exists()) return;
+
+    await FaceMlDetectSerial.runEnrollmentPrime(() async {
+      if (_closed) return;
+      final input = InputImage.fromFilePath(path);
+      await _detector.processImage(input);
+    });
+
+    _modelPrimed = true;
     if (kDebugMode) {
-      debugPrint('[MLKit] Enrollment detector ready (lazy warm-up on first frame)');
+      debugPrint('[MLKit] Enrollment detector primed (still frame)');
+    }
+  }
+
+  /// No-op when [primeFromFile] already ran.
+  Future<void> warmUp() async {
+    if (_modelPrimed || _closed) return;
+    if (kDebugMode) {
+      debugPrint(
+        '[MLKit] Enrollment detector waiting for still-frame prime',
+      );
     }
   }
 
@@ -74,6 +94,7 @@ class MlKitEnrollmentFaceDetector {
       );
 
       final faces = await _detector.processImage(input);
+      _modelPrimed = true;
       final dims = mlKitReportedDims(frame);
 
       if (faces.isEmpty) {

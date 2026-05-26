@@ -6,6 +6,7 @@ import 'package:attendance_kiosk_app/core/config/attendance_mode.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/widgets/dashboard/dashboard_hero_header.dart';
 import 'package:attendance_kiosk_app/features/auth/login/presentation/providers/login_providers.dart';
+import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_organization.dart';
 import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
 /// Device settings — attendance mode (admin) and device info.
@@ -148,7 +149,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      KioskSettingsStrings.deviceInfoTitle,
+                      KioskSettingsStrings.brandingTitle,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w600,
                           ),
@@ -159,15 +160,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         KioskSettingsStrings.noConfig,
                         style: Theme.of(context).textTheme.bodyLarge,
                       )
-                    else ...[
-                      _row(context, KioskSettingsStrings.domainLabel, config.domain),
-                      _row(context, KioskSettingsStrings.machineLabel, config.machineName),
-                      _row(context, KioskSettingsStrings.codeLabel, config.code),
-                      if (config.adminName != null)
-                        _row(context, KioskSettingsStrings.adminLabel, config.adminName!),
-                      if (config.adminEmail != null)
-                        _row(context, KioskSettingsStrings.emailLabel, config.adminEmail!),
-                    ],
+                    else if (config.organization == null)
+                      Text(
+                        KioskSettingsStrings.noBranding,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      )
+                    else ..._organizationBrandingRows(context, config.organization!),
                   ],
                 ),
               ),
@@ -176,6 +174,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         );
       },
     );
+  }
+
+  List<Widget> _organizationBrandingRows(
+    BuildContext context,
+    KioskOrganization org,
+  ) {
+    final display = org.displayName?.trim();
+    final company = org.companyName?.trim();
+    return [
+      if (display != null && display.isNotEmpty)
+        _row(context, KioskSettingsStrings.displayNameLabel, display),
+      if (company != null && company.isNotEmpty)
+        _row(context, KioskSettingsStrings.companyNameLabel, company),
+      if (org.organizationCode.isNotEmpty)
+        _row(
+          context,
+          KioskSettingsStrings.organizationCodeLabel,
+          org.organizationCode,
+        ),
+    ];
   }
 
   Widget _row(BuildContext context, String label, String value) {

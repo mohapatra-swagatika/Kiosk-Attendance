@@ -5,9 +5,8 @@ import 'package:uuid/uuid.dart';
 import 'package:attendance_kiosk_app/core/device/device_id_service.dart';
 import 'package:attendance_kiosk_app/core/errors/exceptions.dart';
 import 'package:attendance_kiosk_app/core/errors/failures.dart';
-import 'package:attendance_kiosk_app/core/sync/data/sync_repository_impl.dart';
-import 'package:attendance_kiosk_app/core/sync/domain/sync_queue_item.dart';
-import 'package:attendance_kiosk_app/core/sync/domain/sync_repository.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/domain/repositories/kiosk_events_repository.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_event_types.dart';
 import 'package:attendance_kiosk_app/features/attendance/data/datasources/attendance_log_local_data_source.dart';
 import 'package:attendance_kiosk_app/features/attendance/data/models/attendance_log_model.dart';
 import 'package:attendance_kiosk_app/features/attendance/domain/entities/attendance_log.dart';
@@ -15,11 +14,11 @@ import 'package:attendance_kiosk_app/features/attendance/domain/repositories/att
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 
 class AttendanceRepositoryImpl implements AttendanceRepository {
-  AttendanceRepositoryImpl(this._local, this._deviceId, this._sync);
+  AttendanceRepositoryImpl(this._local, this._deviceId, this._kioskEvents);
 
   final AttendanceLogLocalDataSource _local;
   final DeviceIdService _deviceId;
-  final SyncRepository _sync;
+  final KioskEventsRepository _kioskEvents;
   static const _uuid = Uuid();
   static final _dateFmt = DateFormat('yyyy-MM-dd');
 
@@ -59,6 +58,7 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
   Future<Either<Failure, AttendanceLog>> checkIn(
     Employee employee, {
     String? photoPath,
+    String authMethod = KioskAuthMethods.face,
   }) async {
     try {
       final activeEither = await getActiveCheckIn(employee.id);
@@ -83,11 +83,13 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
       final models = await _local.readAll();
       models.add(AttendanceLogModel.fromEntity(log));
       await _local.writeAll(models);
-      await _sync.enqueue(
-        SyncRepositoryImpl.attendanceItem(
-          type: SyncQueueTypes.attendanceCheckIn,
-          payload: AttendanceLogModel.fromEntity(log).toJson(),
-        ),
+      await _kioskEvents.recordAttendanceEvent(
+        attendanceLogId: log.id!,
+        employeeId: employee.id,
+        isCheckOut: false,
+        authMethod: authMethod,
+        eventTime: now,
+        photoPath: photoPath,
       );
       return Right(log);
     } on CacheException catch (e) {
@@ -99,6 +101,7 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
   Future<Either<Failure, AttendanceLog>> checkOut(
     Employee employee, {
     String? photoPath,
+    String authMethod = KioskAuthMethods.face,
   }) async {
     try {
       final activeEither = await getActiveCheckIn(employee.id);
@@ -120,11 +123,13 @@ class AttendanceRepositoryImpl implements AttendanceRepository {
             models[idx] = AttendanceLogModel.fromEntity(updated);
             await _local.writeAll(models);
           }
-          await _sync.enqueue(
-            SyncRepositoryImpl.attendanceItem(
-              type: SyncQueueTypes.attendanceCheckOut,
-              payload: AttendanceLogModel.fromEntity(updated).toJson(),
-            ),
+          await _kioskEvents.recordAttendanceEvent(
+            attendanceLogId: updated.id ?? active.id!,
+            employeeId: employee.id,
+            isCheckOut: true,
+            authMethod: authMethod,
+            eventTime: now,
+            photoPath: photoPath,
           );
           return Right(updated);
         },

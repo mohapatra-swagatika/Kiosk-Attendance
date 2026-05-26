@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:attendance_kiosk_app/core/config/kiosk_pin_policy.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_event_types.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/widgets/glass_panel.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
-import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/employee_match_dialog.dart';
+import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_organization_branding.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_pin_pad.dart';
 import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
@@ -27,15 +29,8 @@ class _KioskPinAttendancePanelState extends ConsumerState<KioskPinAttendancePane
   String? _error;
 
   Future<void> _submit() async {
-    if (_pin.length < 4) {
+    if (!KioskPinPolicy.isValidFormat(_pin)) {
       setState(() => _error = KioskPinStrings.pinTooShort);
-      return;
-    }
-
-    final config = ref.read(kioskConfigProvider).valueOrNull;
-    final adminPin = config?.adminPin?.trim();
-    if (adminPin != null && adminPin.isNotEmpty && _pin == adminPin) {
-      setState(() => _error = KioskPinStrings.adminUseLogin);
       return;
     }
 
@@ -45,19 +40,30 @@ class _KioskPinAttendancePanelState extends ConsumerState<KioskPinAttendancePane
     });
 
     final list = await ref.read(employeesListProvider.future);
-    Employee? employee;
-    for (final e in list) {
-      if (e.pin.trim() == _pin) {
-        employee = e;
-        break;
-      }
-    }
+    final employee = KioskPinPolicy.findEmployeeByPin(list, _pin);
 
     if (!mounted) return;
+
     if (employee == null) {
+      final config = ref.read(kioskConfigProvider).valueOrNull;
+      if (KioskPinPolicy.isDeviceAdminPin(_pin, config?.adminPin)) {
+        setState(() {
+          _submitting = false;
+          _error = KioskPinStrings.adminUseLogin;
+        });
+        return;
+      }
       setState(() {
         _submitting = false;
-        _error = KioskPinStrings.employeeNotFound;
+        _error = KioskPinStrings.invalidPin;
+      });
+      return;
+    }
+
+    if (employee.isAdmin) {
+      setState(() {
+        _submitting = false;
+        _error = KioskPinStrings.adminUseLogin;
       });
       return;
     }
@@ -74,11 +80,12 @@ class _KioskPinAttendancePanelState extends ConsumerState<KioskPinAttendancePane
       ref: ref,
       employee: employee,
       activeLog: activeLog,
+      authMethod: KioskAuthMethods.pin,
     );
   }
 
   void _tapDigit(String d) {
-    if (_submitting || _pin.length >= 6) return;
+    if (_submitting || _pin.length >= KioskPinPolicy.length) return;
     setState(() {
       _pin += d;
       _error = null;
@@ -109,12 +116,15 @@ class _KioskPinAttendancePanelState extends ConsumerState<KioskPinAttendancePane
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.pin_outlined, size: 48, color: scheme.primary),
-                const SizedBox(height: 12),
+                const KioskOrganizationBranding(
+                  padding: EdgeInsets.zero,
+                  centered: true,
+                ),
+                const SizedBox(height: 16),
                 Text(
                   KioskSidebarStrings.pinAttendance,
                   textAlign: TextAlign.center,
-                  style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+                  style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -124,7 +134,7 @@ class _KioskPinAttendancePanelState extends ConsumerState<KioskPinAttendancePane
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  _pin.isEmpty ? '••••' : '•' * _pin.length,
+                  KioskPinPolicy.maskedDisplay(_pin),
                   textAlign: TextAlign.center,
                   style: textTheme.displaySmall?.copyWith(
                     fontWeight: FontWeight.w800,

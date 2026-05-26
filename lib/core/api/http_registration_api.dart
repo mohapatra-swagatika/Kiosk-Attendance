@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:attendance_kiosk_app/core/api/kiosk_pair_api_urls.dart';
+import 'package:attendance_kiosk_app/core/api/pair_organization_parser.dart';
 import 'package:attendance_kiosk_app/core/api/registration_api.dart';
 import 'package:attendance_kiosk_app/core/api/registration_api_exception.dart';
 import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_config.dart';
@@ -38,6 +39,7 @@ class HttpRegistrationApi implements RegistrationApi {
 
     if (kDebugMode) {
       debugPrint('[KioskPair] POST $url');
+      debugPrint('[KioskPair] request body: $body');
     }
 
     final client = _client ?? http.Client();
@@ -55,11 +57,9 @@ class HttpRegistrationApi implements RegistrationApi {
           )
           .timeout(_timeout);
 
-      if (kDebugMode) {
-        debugPrint('[KioskPair] ${response.statusCode} ${response.body.length} bytes');
-      }
-
-      return _parseResponse(response, apiHost: host);
+      final result = _parseResponse(response, apiHost: host);
+      _logPairApiDetails(response: response, result: result);
+      return result;
     } on RegistrationApiException {
       rethrow;
     } catch (e) {
@@ -112,6 +112,9 @@ class HttpRegistrationApi implements RegistrationApi {
     }
 
     final data = parsed.data;
+    final organization = PairOrganizationParser.fromPairData(data);
+    final orgLogo = organization?.companyLogoUrl;
+    final deviceToken = _readString(data, const ['deviceToken', 'device_token']);
     return RegistrationApiResult(
       success: true,
       message: parsed.message,
@@ -123,19 +126,21 @@ class HttpRegistrationApi implements RegistrationApi {
       ]),
       adminName: _readString(data, const ['admin_name', 'adminName', 'name']),
       adminEmail: _readString(data, const ['admin_email', 'adminEmail', 'email']),
-      logoUrl: _readString(data, const ['logo_url', 'logoUrl', 'logo']),
+      logoUrl: orgLogo ??
+          _readString(data, const ['logo_url', 'logoUrl', 'logo']),
       brandingImageUrl: _readString(data, const [
         'branding_image_url',
         'brandingImageUrl',
         'banner_url',
         'branding_url',
       ]),
+      organization: organization,
       deviceId: _readString(data, const ['deviceId', 'device_id']),
       deviceIdentifier: _readString(data, const [
         'deviceIdentifier',
         'device_identifier',
       ]),
-      deviceToken: _readString(data, const ['deviceToken', 'device_token']),
+      deviceToken: deviceToken,
       machineName: _readString(data, const ['machineName', 'machine_name']),
       description: _readString(data, const ['description']),
       apiBaseUrl: 'https://$apiHost',
@@ -146,6 +151,63 @@ class HttpRegistrationApi implements RegistrationApi {
         'paired_at',
       ]),
     );
+  }
+
+  /// Debug-only: full pair API response + parsed fields (includes [deviceToken]).
+  static void _logPairApiDetails({
+    required http.Response response,
+    required RegistrationApiResult result,
+  }) {
+    if (!kDebugMode) return;
+
+    debugPrint('[KioskPair] ────────── pair API response ──────────');
+    debugPrint('[KioskPair] HTTP ${response.statusCode} (${response.body.length} bytes)');
+
+    if (response.body.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(response.body);
+        final pretty = const JsonEncoder.withIndent('  ').convert(decoded);
+        debugPrint('[KioskPair] raw JSON:\n$pretty');
+      } catch (_) {
+        debugPrint('[KioskPair] raw body: ${response.body}');
+      }
+    } else {
+      debugPrint('[KioskPair] raw body: (empty)');
+    }
+
+    debugPrint('[KioskPair] parsed success=${result.success}');
+    if (result.message != null) {
+      debugPrint('[KioskPair] message: ${result.message}');
+    }
+
+    if (!result.success) {
+      debugPrint('[KioskPair] ────────────────────────────────────────');
+      return;
+    }
+
+    debugPrint('[KioskPair] deviceId: ${result.deviceId ?? '(null)'}');
+    debugPrint('[KioskPair] deviceIdentifier: ${result.deviceIdentifier ?? '(null)'}');
+    debugPrint('[KioskPair] deviceToken: ${result.deviceToken ?? '(null)'}');
+    debugPrint('[KioskPair] machineName: ${result.machineName ?? '(null)'}');
+    debugPrint('[KioskPair] description: ${result.description ?? '(null)'}');
+    debugPrint('[KioskPair] apiBaseUrl: ${result.apiBaseUrl ?? '(null)'}');
+    debugPrint('[KioskPair] registeredAt: ${result.registeredAt?.toIso8601String() ?? '(null)'}');
+    debugPrint('[KioskPair] adminPin: ${result.adminPin != null ? '***' : '(null)'}');
+    debugPrint('[KioskPair] adminName: ${result.adminName ?? '(null)'}');
+    debugPrint('[KioskPair] adminEmail: ${result.adminEmail ?? '(null)'}');
+    debugPrint('[KioskPair] logoUrl: ${result.logoUrl ?? '(null)'}');
+
+    final org = result.organization;
+    if (org == null) {
+      debugPrint('[KioskPair] organization: (null)');
+    } else {
+      debugPrint('[KioskPair] organization.subdomain: ${org.subdomain ?? '(null)'}');
+      debugPrint('[KioskPair] organization.companyName: ${org.companyName ?? '(null)'}');
+      debugPrint('[KioskPair] organization.displayName: ${org.displayName ?? '(null)'}');
+      debugPrint('[KioskPair] organization.companyLogoUrl: ${org.companyLogoUrl ?? '(null)'}');
+    }
+
+    debugPrint('[KioskPair] ────────────────────────────────────────');
   }
 
   /// ThinkSys envelope: `{ status, result: { status, message, data: { … } } }`.

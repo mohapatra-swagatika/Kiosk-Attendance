@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -20,7 +21,9 @@ import 'package:attendance_kiosk_app/core/ml/face_id_live_metrics.dart';
 import 'package:attendance_kiosk_app/core/ml/face_registration_session.dart';
 import 'package:attendance_kiosk_app/core/ml/face_track_smoother.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_analyzer.dart';
+import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 import 'package:attendance_kiosk_app/core/errors/failures.dart';
+import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
@@ -56,6 +59,7 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
   FaceIdEnrollPhase _lastPhase = FaceIdEnrollPhase.positioning;
   DateTime _lastMlAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime? _mlStreamStartedAt;
+  bool _mlKitPrimed = false;
   Ticker? _uiTicker;
   double _lastRingShown = 0;
   Offset? _smoothedFaceDot;
@@ -166,15 +170,18 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       setState(() {
         _camera = controller;
         _status = FaceRegistrationStrings.preparingCamera;
-        _detail = null;
+        _detail = FaceRegistrationStrings.preparingFaceScanner;
       });
+
+      _mlKitPrimed = await _primeEnrollmentMlKit(controller);
+
+      if (!mounted) return;
 
       await CameraSessionHelper.startImageStreamAfterPreview(
         controller: controller,
         previewDelay: CameraSessionHelper.enrollmentPreviewDelay(),
         onFrame: _onEnrollmentFrame,
       );
-      unawaited(_analyzer.warmUp());
       _mlStreamStartedAt = DateTime.now();
 
       if (!mounted) return;
@@ -192,13 +199,36 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     }
   }
 
+  /// Loads ML Kit on a still frame before the live stream (avoids freezing preview).
+  Future<bool> _primeEnrollmentMlKit(CameraController controller) async {
+    try {
+      final still = await CameraSessionHelper.takeStillPicture(controller);
+      if (still == null) return false;
+      try {
+        await MlKitEnrollmentFaceDetector.instance.primeFromFile(still.path);
+        return MlKitEnrollmentFaceDetector.instance.isModelPrimed;
+      } finally {
+        try {
+          await File(still.path).delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[FaceRegistration] ML Kit prime failed: $e');
+      }
+      return false;
+    }
+  }
+
   Future<void> _processFrame(CameraImage image) async {
     if (_disposed || _blocked || _camera == null) return;
 
     final started = _mlStreamStartedAt;
     if (started != null &&
         DateTime.now().difference(started) <
-            CameraSessionHelper.enrollmentMlSettleDelay()) {
+            CameraSessionHelper.enrollmentMlSettleDelay(
+              mlKitPrimed: _mlKitPrimed,
+            )) {
       return;
     }
 
@@ -357,6 +387,8 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       (_) {
         ref.invalidate(employeesListProvider);
         ref.invalidate(employeeHasFaceEmbeddingProvider(widget.employeeId));
+        ref.invalidate(faceDataSyncPendingCountProvider);
+        ref.invalidate(offlineSyncPendingCountProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(

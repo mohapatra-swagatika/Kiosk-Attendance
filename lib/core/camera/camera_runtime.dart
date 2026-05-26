@@ -40,13 +40,18 @@ class CameraRuntime {
       ? const Duration(milliseconds: 180)
       : const Duration(milliseconds: 120);
 
-  static Duration enrollmentMlSettleDelay() {
+  static Duration enrollmentMlSettleDelay({bool mlKitPrimed = false}) {
+    if (mlKitPrimed) {
+      return Platform.isAndroid
+          ? const Duration(milliseconds: 120)
+          : const Duration(milliseconds: 180);
+    }
     if (Platform.isAndroid) {
       return const Duration(milliseconds: 220);
     }
     return isTabletLayout
-        ? const Duration(milliseconds: 650)
-        : const Duration(milliseconds: 900);
+        ? const Duration(milliseconds: 400)
+        : const Duration(milliseconds: 500);
   }
 
   static Duration enrollmentPreviewDelay() {

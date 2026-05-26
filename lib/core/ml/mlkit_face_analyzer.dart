@@ -31,7 +31,7 @@ class MlKitFaceAnalyzer {
       _detector = FaceDetector(
         options: fast
             ? MlKitFaceDetectorFactory.kioskOptions()
-            : MlKitFaceDetectorFactory.enrollmentOptions(),
+            : MlKitFaceDetectorFactory.enrollmentStreamOptions(),
       );
     }
   }
@@ -137,11 +137,7 @@ class MlKitFaceAnalyzer {
     }
   }
 
-  /// Full-quality enrollment capture — strict pose, blur/lighting, landmarks.
-  ///
-  /// iOS uses the original strict path. Android uses a relaxed path because
-  /// ML Kit contours / eye probabilities are often missing on NV21 streams even
-  /// when the face is clearly visible in the circle.
+  /// Enrollment capture — TFLite embedding + crop quality (stream uses fast ML Kit).
   Future<NeuralCaptureResult> captureForEnrollment({
     required CameraFrameClone clone,
     required Face face,
@@ -150,35 +146,17 @@ class MlKitFaceAnalyzer {
       return const NeuralCaptureResult.failure('Analyzer closed');
     }
 
-    if (Platform.isAndroid) {
-      return _captureForEnrollmentAndroid(clone: clone, face: face);
-    }
-
-    if (!_enrollmentLandmarksReady(face)) {
-      return const NeuralCaptureResult.failure(
-        'Show your full face — eyes and nose must be visible',
-      );
-    }
-
-    final qaDims = mlKitReportedDims(clone.frame);
-    final pre = FaceQualityAssessor.preScreen(
+    return _captureForEnrollmentAndroid(
+      clone: clone,
       face: face,
-      frameWidth: qaDims.width,
-      frameHeight: qaDims.height,
-      requireOpenEyes: true,
-      pitchLimit: 22,
-      yawLimit: 42,
+      minCropSharpness: Platform.isIOS ? 16 : 14,
     );
-    if (!pre.passed) {
-      return NeuralCaptureResult.failure(pre.message ?? 'Face quality too low');
-    }
-
-    return _runEnrollmentEmbed(clone: clone, face: face, minCropSharpness: null);
   }
 
   Future<NeuralCaptureResult> _captureForEnrollmentAndroid({
     required CameraFrameClone clone,
     required Face face,
+    double minCropSharpness = 14,
   }) async {
     if (!_enrollmentLandmarksReadyAndroid(face)) {
       return const NeuralCaptureResult.failure(
@@ -199,7 +177,7 @@ class MlKitFaceAnalyzer {
     return _runEnrollmentEmbed(
       clone: clone,
       face: face,
-      minCropSharpness: 14,
+      minCropSharpness: minCropSharpness,
     );
   }
 
@@ -245,16 +223,7 @@ class MlKitFaceAnalyzer {
     }
   }
 
-  static bool _enrollmentLandmarksReady(Face face) {
-    final le = face.landmarks[FaceLandmarkType.leftEye];
-    final re = face.landmarks[FaceLandmarkType.rightEye];
-    final nose = face.landmarks[FaceLandmarkType.noseBase];
-    if (le == null || re == null || nose == null) return false;
-    final faceContour = face.contours[FaceContourType.face];
-    return faceContour != null && faceContour.points.length >= 8;
-  }
-
-  /// Android: contours are often absent despite a valid face box.
+  /// Landmarks without contours (fast ML Kit stream on iOS/Android).
   static bool _enrollmentLandmarksReadyAndroid(Face face) {
     final le = face.landmarks[FaceLandmarkType.leftEye];
     final re = face.landmarks[FaceLandmarkType.rightEye];

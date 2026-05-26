@@ -11,10 +11,12 @@ abstract class AttendanceRepository {
   Future<Either<Failure, AttendanceLog>> checkIn(
     Employee employee, {
     String? photoPath,
+    String authMethod = 'face',
   });
 
   Future<Either<Failure, AttendanceLog>> checkOut(
     Employee employee, {
     String? photoPath,
+    String authMethod = 'face',
   });
 }

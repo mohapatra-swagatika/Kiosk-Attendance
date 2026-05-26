@@ -41,8 +41,9 @@ class CameraSessionHelper {
     return list;
   }
 
-  /// Platform enrollment settle (iOS keeps longer delay on phones).
-  static Duration enrollmentMlSettleDelay() => CameraRuntime.enrollmentMlSettleDelay();
+  /// Platform enrollment settle after ML Kit still-frame prime.
+  static Duration enrollmentMlSettleDelay({bool mlKitPrimed = false}) =>
+      CameraRuntime.enrollmentMlSettleDelay(mlKitPrimed: mlKitPrimed);
 
   /// Platform enrollment preview delay before starting the image stream.
   static Duration enrollmentPreviewDelay() => CameraRuntime.enrollmentPreviewDelay();

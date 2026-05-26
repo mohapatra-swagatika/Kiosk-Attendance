@@ -32,8 +32,13 @@ abstract class FaceRepository {
   /// Aligns `faceRegistered` flags with on-device face profiles.
   Future<Either<Failure, void>> reconcileFaceRegistrationFlags();
 
-  /// Replaces on-device gallery with server snapshot profiles (v7 tflite only).
+  /// Merges server snapshot/sync profiles into the on-device gallery (v7 tflite).
+  ///
+  /// Server profiles overwrite per employee id. When [rosterEmployeeIds] is set,
+  /// profiles for employees no longer on the roster are removed. Local enrollments
+  /// for roster employees without server face data are preserved.
   Future<Either<Failure, int>> importServerGallery(
-    Map<String, Map<String, dynamic>> profiles,
-  );
+    Map<String, Map<String, dynamic>> serverProfiles, {
+    Set<String>? rosterEmployeeIds,
+  });
 }

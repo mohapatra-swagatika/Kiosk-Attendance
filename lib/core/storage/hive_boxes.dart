@@ -12,4 +12,8 @@ abstract final class HiveKeys {
   static const String faceProfiles = 'face_profiles';
   static const String syncQueue = 'sync_queue';
   static const String syncMetadata = 'sync_metadata';
+  static const String kioskEventsQueue = 'kiosk_events_queue';
+  static const String faceDataSyncQueue = 'face_data_sync_queue';
+  static const String faceDataSyncMetadata = 'face_data_sync_metadata';
+  static const String employeeSyncMetadata = 'employee_sync_metadata';
 }

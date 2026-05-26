@@ -1,5 +1,6 @@
 import 'package:attendance_kiosk_app/core/api/registration_api.dart';
 import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_config.dart';
+import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_organization.dart';
 
 /// Simulates online registration until backend APIs are available.
 class MockRegistrationApi implements RegistrationApi {
@@ -18,6 +19,7 @@ class MockRegistrationApi implements RegistrationApi {
         ? config.adminPin!.trim()
         : _pinFromCode(config.code);
     final now = DateTime.now().toUtc();
+    final orgCode = config.code.trim();
     return RegistrationApiResult(
       success: true,
       message: 'Device registered successfully',
@@ -26,6 +28,12 @@ class MockRegistrationApi implements RegistrationApi {
       adminEmail: config.adminEmail ?? 'admin@${config.domain}',
       logoUrl: null,
       brandingImageUrl: null,
+      organization: KioskOrganization(
+        subdomain: orgCode,
+        companyName: 'Thinksys Software Private Ltd',
+        displayName: 'ThinkSys Demo',
+        companyLogoUrl: null,
+      ),
       deviceId: 'mock-${config.code.trim()}',
       deviceIdentifier: 'kiosk_mock_${config.code.trim()}',
       deviceToken: 'DKT-MOCK-${config.code.trim()}',

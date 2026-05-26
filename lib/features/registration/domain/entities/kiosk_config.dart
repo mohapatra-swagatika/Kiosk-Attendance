@@ -1,6 +1,8 @@
 import 'package:equatable/equatable.dart';
 
 import 'package:attendance_kiosk_app/core/config/attendance_mode.dart';
+import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_branding_fields.dart';
+import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_organization.dart';
 
 class KioskConfig extends Equatable {
   const KioskConfig({
@@ -15,6 +17,7 @@ class KioskConfig extends Equatable {
     this.brandingImagePath,
     this.logoUrl,
     this.brandingImageUrl,
+    this.organization,
     this.attendanceMode = AttendanceMode.face,
     this.deviceId,
     this.deviceIdentifier,
@@ -40,7 +43,36 @@ class KioskConfig extends Equatable {
   /// Remote URLs — used to re-fetch branding if local files are missing.
   final String? logoUrl;
   final String? brandingImageUrl;
+
+  /// Tenant branding from pair API `data.organization`.
+  final KioskOrganization? organization;
+
   final AttendanceMode attendanceMode;
+
+  String get brandingTitle {
+    final org = organization;
+    if (org != null) {
+      final title = org.primaryTitle;
+      if (title.isNotEmpty) return title;
+    }
+    return code;
+  }
+
+  String get organizationCode =>
+      organization?.organizationCode.trim().isNotEmpty == true
+          ? organization!.organizationCode
+          : code;
+
+  /// Company name for branding UI (falls back to display name).
+  String get companyNameForDisplay =>
+      KioskBrandingFields.fromOrganization(organization).companyNameForDisplay;
+
+  String? get companyLogoUrlForDisplay {
+    final url = organization?.companyLogoUrl?.trim();
+    if (url != null && url.isNotEmpty) return url;
+    final legacy = logoUrl?.trim();
+    return legacy != null && legacy.isNotEmpty ? legacy : null;
+  }
 
   /// Pair API `deviceId` — used for sync and attendance.
   final String? deviceId;
@@ -69,6 +101,7 @@ class KioskConfig extends Equatable {
     String? brandingImagePath,
     String? logoUrl,
     String? brandingImageUrl,
+    KioskOrganization? organization,
     AttendanceMode? attendanceMode,
     String? deviceId,
     String? deviceIdentifier,
@@ -88,6 +121,7 @@ class KioskConfig extends Equatable {
       brandingImagePath: brandingImagePath ?? this.brandingImagePath,
       logoUrl: logoUrl ?? this.logoUrl,
       brandingImageUrl: brandingImageUrl ?? this.brandingImageUrl,
+      organization: organization ?? this.organization,
       attendanceMode: attendanceMode ?? this.attendanceMode,
       deviceId: deviceId ?? this.deviceId,
       deviceIdentifier: deviceIdentifier ?? this.deviceIdentifier,
@@ -110,6 +144,7 @@ class KioskConfig extends Equatable {
         brandingImagePath,
         logoUrl,
         brandingImageUrl,
+        organization,
         attendanceMode,
         deviceId,
         deviceIdentifier,

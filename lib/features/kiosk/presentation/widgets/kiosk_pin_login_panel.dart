@@ -5,13 +5,13 @@ import 'package:go_router/go_router.dart';
 import 'package:attendance_kiosk_app/app/router/route_paths.dart';
 import 'package:attendance_kiosk_app/app/router/router_refresh.dart';
 import 'package:attendance_kiosk_app/core/auth/user_role.dart';
-import 'package:attendance_kiosk_app/core/api/kiosk_pair_api_urls.dart';
+import 'package:attendance_kiosk_app/core/config/kiosk_pin_policy.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/widgets/glass_panel.dart';
 import 'package:attendance_kiosk_app/features/auth/login/domain/usecases/login_with_pin_usecase.dart';
 import 'package:attendance_kiosk_app/features/auth/login/presentation/providers/login_providers.dart';
+import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_organization_branding.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_pin_pad.dart';
-import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
 class KioskPinLoginPanel extends ConsumerStatefulWidget {
   const KioskPinLoginPanel({super.key, required this.onCancel});
@@ -28,7 +28,7 @@ class _KioskPinLoginPanelState extends ConsumerState<KioskPinLoginPanel> {
   String? _error;
 
   Future<void> _submit() async {
-    if (_pin.length < 4) {
+    if (!KioskPinPolicy.isValidFormat(_pin)) {
       setState(() => _error = KioskPinStrings.pinTooShort);
       return;
     }
@@ -57,7 +57,7 @@ class _KioskPinLoginPanelState extends ConsumerState<KioskPinLoginPanel> {
   }
 
   void _tapDigit(String d) {
-    if (_submitting || _pin.length >= 6) return;
+    if (_submitting || _pin.length >= KioskPinPolicy.length) return;
     setState(() {
       _pin += d;
       _error = null;
@@ -74,8 +74,6 @@ class _KioskPinLoginPanelState extends ConsumerState<KioskPinLoginPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final configAsync = ref.watch(kioskConfigProvider);
-    final domain = KioskPairApiUrls.subdomainFromStored(configAsync.valueOrNull?.domain ?? '');
     final scheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -90,17 +88,9 @@ class _KioskPinLoginPanelState extends ConsumerState<KioskPinLoginPanel> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.domain, size: 48, color: scheme.primary),
-                const SizedBox(height: 12),
-                Text(
-                  domain.isEmpty ? AppStrings.appTitle : domain,
-                  textAlign: TextAlign.center,
-                  style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                Text(
-                  RegistrationStrings.domainSuffix,
-                  textAlign: TextAlign.center,
-                  style: textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                const KioskOrganizationBranding(
+                  padding: EdgeInsets.zero,
+                  centered: true,
                 ),
                 const SizedBox(height: 24),
                 Text(
@@ -110,7 +100,7 @@ class _KioskPinLoginPanelState extends ConsumerState<KioskPinLoginPanel> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  _pin.isEmpty ? '••••' : '•' * _pin.length,
+                  KioskPinPolicy.maskedDisplay(_pin),
                   textAlign: TextAlign.center,
                   style: textTheme.displaySmall?.copyWith(
                     fontWeight: FontWeight.w800,

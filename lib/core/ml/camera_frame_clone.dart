@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 
@@ -36,9 +34,7 @@ class CameraFrameClone {
 
     return CameraFrameClone(
       frame: LiveCameraFrame(
-        bytes: Platform.isAndroid
-            ? _fastCopyBytes(live.bytes)
-            : Uint8List.fromList(live.bytes),
+        bytes: _fastCopyBytes(live.bytes),
         width: live.width,
         height: live.height,
         rotationDegrees: live.rotationDegrees,

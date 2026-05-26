@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:attendance_kiosk_app/app/router/route_paths.dart';
 import 'package:attendance_kiosk_app/app/theme/app_button_styles.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
+import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
@@ -88,9 +89,12 @@ Future<void> showEmployeeFaceConfigSheet({
                         (f) => ScaffoldMessenger.of(sheetContext)
                             .showSnackBar(SnackBar(content: Text(f.message))),
                         (_) {
+                          ref.read(faceRepositoryProvider).invalidateGalleryCache();
                           ref.invalidate(employeesListProvider);
                           ref.invalidate(employeeByIdProvider(employee.id));
                           ref.invalidate(employeeHasFaceEmbeddingProvider(employee.id));
+                          ref.invalidate(faceDataSyncPendingCountProvider);
+                          ref.invalidate(offlineSyncPendingCountProvider);
                           Navigator.pop(sheetContext);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text(FaceConfigStrings.resetSnackbar)),

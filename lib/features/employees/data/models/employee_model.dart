@@ -9,6 +9,8 @@ class EmployeeModel {
     required this.imageUrl,
     required this.pin,
     required this.faceRegistered,
+    this.faceProfileHash,
+    this.isAdmin = false,
     this.employeeCode,
     this.email,
     this.designation,
@@ -26,6 +28,8 @@ class EmployeeModel {
         imageUrl: e.imageUrl,
         pin: e.pin,
         faceRegistered: e.faceRegistered,
+        faceProfileHash: e.faceProfileHash,
+        isAdmin: e.isAdmin,
         employeeCode: e.employeeCode,
         email: e.email,
         designation: e.designation,
@@ -43,8 +47,10 @@ class EmployeeModel {
       name: json['name'] as String? ?? '',
       department: json['department'] as String? ?? '',
       imageUrl: json['imageUrl'] as String? ?? '',
-      pin: json['pin'] as String? ?? pinFallbackForId(id),
+      pin: _pinFromJson(json),
       faceRegistered: json['faceRegistered'] as bool? ?? false,
+      faceProfileHash: json['faceProfileHash'] as String?,
+      isAdmin: json['isAdmin'] as bool? ?? false,
       employeeCode: json['employeeCode'] as String?,
       email: json['email'] as String?,
       designation: json['designation'] as String?,
@@ -56,14 +62,19 @@ class EmployeeModel {
     );
   }
 
-  /// Derives a 4-digit PIN from the employee id when legacy records lack one.
-  static String pinFallbackForId(String id) {
-    final digits = id.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 4) {
-      return digits.substring(digits.length - 4);
+  static String _pinFromJson(Map<String, dynamic> json) {
+    for (final key in const [
+      'pin',
+      'kioskPin',
+      'kiosk_pin',
+      'attendancePin',
+      'employeePin',
+    ]) {
+      final v = json[key];
+      if (v is String && v.trim().isNotEmpty) return v.trim();
+      if (v is num) return v.toString().trim();
     }
-    if (digits.isNotEmpty) return digits.padLeft(4, '0');
-    return '0000';
+    return '';
   }
 
   static List<EmployeeMonthShift>? _shiftsFromJson(Object? raw) {
@@ -106,6 +117,8 @@ class EmployeeModel {
   final String imageUrl;
   final String pin;
   final bool faceRegistered;
+  final String? faceProfileHash;
+  final bool isAdmin;
   final String? employeeCode;
   final String? email;
   final String? designation;
@@ -122,6 +135,8 @@ class EmployeeModel {
         imageUrl: imageUrl,
         pin: pin,
         faceRegistered: faceRegistered,
+        faceProfileHash: faceProfileHash,
+        isAdmin: isAdmin,
         employeeCode: employeeCode,
         email: email,
         designation: designation,
@@ -139,6 +154,8 @@ class EmployeeModel {
         'imageUrl': imageUrl,
         'pin': pin,
         'faceRegistered': faceRegistered,
+        if (faceProfileHash != null) 'faceProfileHash': faceProfileHash,
+        'isAdmin': isAdmin,
         if (employeeCode != null) 'employeeCode': employeeCode,
         if (email != null) 'email': email,
         if (designation != null) 'designation': designation,

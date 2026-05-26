@@ -40,16 +40,22 @@ class KioskConfigRepositoryImpl implements KioskConfigRepository {
         return Left(ValidationFailure(remote.message ?? 'Registration failed'));
       }
 
+      final apiHost = KioskPairApiUrls.toApiHost(config.domain);
+      final apiBaseUrl =
+          remote.apiBaseUrl ?? (apiHost.isNotEmpty ? 'https://$apiHost' : null);
+      final organization = remote.organization;
+      final orgCode = _nonEmpty(organization?.subdomain) ?? config.code;
+      final logoUrl = KioskPairApiUrls.resolveAssetUrl(remote.logoUrl, apiBaseUrl);
+
       final branding = await _brandingCache.persist(
-        logoUrl: remote.logoUrl,
-        brandingImageUrl: remote.brandingImageUrl,
-        orgCode: config.code,
+        logoUrl: logoUrl,
+        brandingImageUrl: null,
+        orgCode: orgCode,
       );
 
-      final apiHost = KioskPairApiUrls.toApiHost(config.domain);
       final registeredAtIso = remote.registeredAt?.toUtc().toIso8601String();
       final toStore = KioskConfig(
-        code: config.code,
+        code: orgCode,
         domain: apiHost.isNotEmpty ? apiHost : config.domain,
         machineName: _nonEmpty(remote.machineName) ?? config.machineName,
         description: _nonEmpty(remote.description) ?? config.description,
@@ -57,14 +63,15 @@ class KioskConfigRepositoryImpl implements KioskConfigRepository {
         adminEmail: remote.adminEmail ?? config.adminEmail,
         adminPin: remote.adminPin ?? config.adminPin,
         logoPath: branding.logoPath,
-        brandingImagePath: branding.brandingImagePath,
-        logoUrl: remote.logoUrl,
-        brandingImageUrl: remote.brandingImageUrl,
+        brandingImagePath: null,
+        logoUrl: logoUrl,
+        brandingImageUrl: null,
+        organization: organization,
         attendanceMode: config.attendanceMode,
         deviceId: remote.deviceId,
         deviceIdentifier: remote.deviceIdentifier,
         deviceToken: remote.deviceToken,
-        apiBaseUrl: remote.apiBaseUrl ?? (apiHost.isNotEmpty ? 'https://$apiHost' : null),
+        apiBaseUrl: apiBaseUrl,
         registeredAtIso: registeredAtIso,
       );
 

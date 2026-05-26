@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import 'package:attendance_kiosk_app/core/errors/failures.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
-import 'package:attendance_kiosk_app/core/sync/sync_providers.dart';
+import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_events_providers.dart';
 
 /// Last sync time, pending count, and sync action — used in the logged-in shell drawer.
 class SyncStatusFooter extends ConsumerStatefulWidget {
@@ -18,27 +20,49 @@ class _SyncStatusFooterState extends ConsumerState<SyncStatusFooter> {
 
   Future<void> _sync() async {
     setState(() => _syncing = true);
-    final result = await ref.read(syncRepositoryProvider).flushPending();
-    ref.invalidate(syncMetadataProvider);
-    ref.invalidate(syncPendingCountProvider);
+    final eventsResult =
+        await ref.read(kioskEventsRepositoryProvider).syncPending();
+    final faceResult =
+        await ref.read(faceDataSyncRepositoryProvider).syncPending();
+    ref.invalidate(kioskEventsLastSyncProvider);
+    ref.invalidate(kioskEventsPendingCountProvider);
+    ref.invalidate(faceDataSyncLastSyncProvider);
+    ref.invalidate(faceDataSyncPendingCountProvider);
+    ref.invalidate(offlineSyncPendingCountProvider);
     if (!mounted) return;
     setState(() => _syncing = false);
-    result.fold(
-      (f) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(f.message)),
-      ),
-      (count) => ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(KioskSidebarStrings.syncedCount(count))),
+
+    Failure? failure;
+    var eventsCount = 0;
+    var faceCount = 0;
+    eventsResult.fold(
+      (f) => failure = f,
+      (c) => eventsCount = c,
+    );
+    faceResult.fold(
+      (f) => failure ??= f,
+      (c) => faceCount = c,
+    );
+    if (failure != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(failure!.message)),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(KioskSidebarStrings.syncedCount(eventsCount + faceCount)),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final metadataAsync = ref.watch(syncMetadataProvider);
-    final pendingAsync = ref.watch(syncPendingCountProvider);
+    final metadataAsync = ref.watch(kioskEventsLastSyncProvider);
+    final faceMetadataAsync = ref.watch(faceDataSyncLastSyncProvider);
+    final pendingAsync = ref.watch(offlineSyncPendingCountProvider);
     final scheme = Theme.of(context).colorScheme;
-    final lastSync = metadataAsync.valueOrNull?.lastSyncAt;
+    final lastSync = metadataAsync.valueOrNull ?? faceMetadataAsync.valueOrNull;
     final pending = pendingAsync.valueOrNull ?? 0;
 
     return Padding(
@@ -90,12 +114,3 @@ class _SyncStatusFooterState extends ConsumerState<SyncStatusFooter> {
   }
 }
 
-final syncMetadataProvider = FutureProvider((ref) async {
-  final result = await ref.read(syncRepositoryProvider).metadata();
-  return result.fold((_) => null, (m) => m);
-});
-
-final syncPendingCountProvider = FutureProvider((ref) async {
-  final result = await ref.read(syncRepositoryProvider).pendingCount();
-  return result.fold((_) => 0, (c) => c);
-});

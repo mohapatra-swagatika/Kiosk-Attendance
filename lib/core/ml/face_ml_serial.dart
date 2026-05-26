@@ -24,6 +24,15 @@ class FaceMlDetectSerial {
             : const Duration(milliseconds: 650),
       );
 
+  /// One-time ML Kit model load (still frame before live stream).
+  static Future<T> runEnrollmentPrime<T>(
+    Future<T> Function() action,
+  ) =>
+      runWithTimeout(
+        action,
+        timeout: const Duration(seconds: 18),
+      );
+
   /// Kiosk unlock — shorter detect timeout for instant response.
   static Future<T> runKiosk<T>(
     Future<T> Function() action,

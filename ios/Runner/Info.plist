@@ -50,9 +50,11 @@
 	<key>FIREBASE_ANALYTICS_COLLECTION_DEACTIVATED</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>This app connects to the attendance face server on your office Wi‑Fi network.</string>
+	<string>Local network access is required for Flutter debugging and kiosk API sync on your office Wi‑Fi.</string>
 	<key>NSBonjourServices</key>
 	<array>
+		<string>_dartVmService._tcp</string>
+		<string>_dartobservatory._tcp</string>
 		<string>_http._tcp</string>
 	</array>
 	<key>NSAppTransportSecurity</key>

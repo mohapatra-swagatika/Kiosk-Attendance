@@ -202,8 +202,17 @@ class EmployeesStrings {
   static const String subtitle =
       'View your team roster, manage face enrollment, and keep each employee ready for kiosk check-in.';
   static const String empty = 'No employees yet.';
-  static const String syncEmployees = 'Employee sync';
+  static const String searchHint = 'Search by name or department';
+  static const String noSearchResults = 'No employees match your search.';
+  static const String syncEmployees = 'Sync employees';
+  static const String syncInProgress = 'Syncing employees…';
   static String syncedCount(int n) => 'Synced $n employees from server';
+  static String syncedCountWithFaces(int employees, int faces) =>
+      'Synced $employees employees ($faces face templates)';
+  static const String syncFailed = 'Employee sync failed';
+  static String lastSynced(String when) => 'Last synced $when';
+  static const String syncNever = 'Not synced yet';
+  static const String syncRetry = 'Retry';
 }
 
 class EmployeeCardStrings {
@@ -281,6 +290,7 @@ class FaceRegistrationStrings {
 
   static const String pageTitleFallback = 'Face ID';
   static const String preparingCamera = 'Preparing camera…';
+  static const String preparingFaceScanner = 'Initializing face scanner…';
 
   static const String alreadyEnrolledTitle = 'Already enrolled';
   static String alreadyEnrolledBody(String employeeId) =>
@@ -491,11 +501,12 @@ class KioskPinStrings {
   static const String title = 'Enter your PIN';
   static const String submit = 'Continue';
   static const String backToScan = 'Back to face scan';
-  static const String pinTooShort = 'Enter at least 4 digits';
+  static const String pinTooShort = 'Enter a 7-digit PIN';
   static const String pinAttendanceHint = 'Enter your employee PIN to check in or out';
   static const String markAttendance = 'Mark attendance';
   static const String adminUseLogin = 'Administrator PIN — use Login using PIN instead';
   static const String employeeNotFound = 'Invalid PIN — employee not found';
+  static const String invalidPin = 'Invalid PIN — no matching employee';
 }
 
 class KioskSettingsStrings {
@@ -515,7 +526,11 @@ class KioskSettingsStrings {
   static const String faceMode = 'Face attendance';
   static const String pinMode = 'PIN attendance';
   static const String modeSaved = 'Attendance mode updated';
-  static const String deviceInfoTitle = 'Device information';
+  static const String brandingTitle = 'Branding';
+  static const String displayNameLabel = 'Display name';
+  static const String companyNameLabel = 'Company name';
+  static const String organizationCodeLabel = 'Organization code';
+  static const String noBranding = 'Organization branding is not available yet.';
   static const String appearanceTitle = 'Appearance';
   static const String themeLight = 'Light';
   static const String themeDark = 'Dark';

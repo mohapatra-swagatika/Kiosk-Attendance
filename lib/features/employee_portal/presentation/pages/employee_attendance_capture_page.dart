@@ -8,8 +8,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'package:attendance_kiosk_app/core/camera/camera_session_helper.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_event_types.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/storage/attendance_photo_store.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_events_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employee_portal/presentation/providers/employee_portal_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
@@ -89,8 +91,16 @@ class _EmployeeAttendanceCapturePageState
 
       final repo = ref.read(attendanceRepositoryProvider);
       final result = widget.isCheckOut
-          ? await repo.checkOut(widget.employee, photoPath: storedPath)
-          : await repo.checkIn(widget.employee, photoPath: storedPath);
+          ? await repo.checkOut(
+              widget.employee,
+              photoPath: storedPath,
+              authMethod: KioskAuthMethods.pin,
+            )
+          : await repo.checkIn(
+              widget.employee,
+              photoPath: storedPath,
+              authMethod: KioskAuthMethods.pin,
+            );
 
       if (!mounted) return;
 
@@ -102,6 +112,7 @@ class _EmployeeAttendanceCapturePageState
         (_) {
           ref.invalidate(employeeActiveCheckInProvider);
           ref.invalidate(attendanceLogsProvider);
+          ref.invalidate(kioskEventsPendingCountProvider);
           Navigator.of(context).pop(true);
         },
       );

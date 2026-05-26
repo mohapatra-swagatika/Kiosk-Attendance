@@ -51,20 +51,23 @@ class BrandingAssetCache {
       logoOk = await _persistFile(
         targetPath: logoPath,
         remoteUrl: config.logoUrl,
-        placeholder: () => _logoPlaceholder(config.code),
+        placeholder: () => _logoPlaceholder(config.organizationCode),
       );
     }
-    if (!bannerOk) {
+    final useOrganizationBranding = config.organization != null;
+    if (!useOrganizationBranding && !bannerOk) {
       bannerOk = await _persistFile(
         targetPath: bannerPath,
         remoteUrl: config.brandingImageUrl,
-        placeholder: () => _bannerPlaceholder(config.code),
+        placeholder: () => _bannerPlaceholder(config.organizationCode),
       );
     }
 
     return config.copyWith(
       logoPath: logoOk ? logoPath : config.logoPath,
-      brandingImagePath: bannerOk ? bannerPath : config.brandingImagePath,
+      brandingImagePath: useOrganizationBranding
+          ? null
+          : (bannerOk ? bannerPath : config.brandingImagePath),
     );
   }
 

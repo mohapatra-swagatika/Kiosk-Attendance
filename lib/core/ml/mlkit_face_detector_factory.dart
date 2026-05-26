@@ -7,14 +7,15 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 class MlKitFaceDetectorFactory {
   MlKitFaceDetectorFactory._();
 
-  /// Face ID enrollment — contours + classification for multi-angle capture (iOS).
-  static FaceDetectorOptions enrollmentOptions() => FaceDetectorOptions(
-        performanceMode: FaceDetectorMode.accurate,
+  /// Live enrollment stream — fast mode keeps iOS preview responsive (accurate +
+  /// contours on the first frame can block the UI thread for 15–20s).
+  static FaceDetectorOptions enrollmentStreamOptions() => FaceDetectorOptions(
+        performanceMode: FaceDetectorMode.fast,
         enableLandmarks: true,
-        enableContours: true,
-        enableClassification: true,
+        enableContours: false,
+        enableClassification: false,
         enableTracking: true,
-        minFaceSize: 0.12,
+        minFaceSize: 0.10,
       );
 
   /// Android enrollment live stream — fast mode + tracking for fluid preview.
@@ -47,9 +48,7 @@ class MlKitFaceDetectorFactory {
       );
 
   static FaceDetector createEnrollment() => FaceDetector(
-        options: Platform.isAndroid
-            ? androidEnrollmentOptions()
-            : enrollmentOptions(),
+        options: enrollmentStreamOptions(),
       );
 
   static FaceDetector createKiosk() {

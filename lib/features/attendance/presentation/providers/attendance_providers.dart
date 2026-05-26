@@ -9,7 +9,8 @@ import 'package:attendance_kiosk_app/features/attendance/domain/repositories/att
 import 'package:attendance_kiosk_app/features/employees/data/datasources/face_profile_local_data_source.dart';
 import 'package:attendance_kiosk_app/features/employees/data/repositories/face_repository_impl.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/repositories/face_repository.dart';
-import 'package:attendance_kiosk_app/core/sync/sync_providers.dart';
+import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_events_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
 import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
@@ -31,7 +32,7 @@ final attendanceRepositoryProvider = Provider<AttendanceRepository>((ref) {
   return AttendanceRepositoryImpl(
     ref.watch(attendanceLogLocalDataSourceProvider),
     ref.watch(deviceIdServiceProvider),
-    ref.watch(syncRepositoryProvider),
+    ref.watch(kioskEventsRepositoryProvider),
   );
 });
 
@@ -39,6 +40,7 @@ final faceRepositoryProvider = Provider<FaceRepository>((ref) {
   return FaceRepositoryImpl(
     ref.watch(faceProfileLocalDataSourceProvider),
     ref.watch(employeeRepositoryProvider),
+    faceDataSync: ref.watch(faceDataSyncRepositoryProvider),
   );
 });
 

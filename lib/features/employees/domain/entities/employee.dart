@@ -10,6 +10,8 @@ class Employee extends Equatable {
     required this.imageUrl,
     required this.pin,
     required this.faceRegistered,
+    this.faceProfileHash,
+    this.isAdmin = false,
     this.employeeCode,
     this.email,
     this.designation,
@@ -28,6 +30,12 @@ class Employee extends Equatable {
   /// Kiosk check-in PIN (shown to operators on the Employees screen).
   final String pin;
   final bool faceRegistered;
+
+  /// SHA-256 of synced `faceDataJson` (empty when no server face data).
+  final String? faceProfileHash;
+
+  /// When true, this employee's kiosk PIN grants admin access (from sync API).
+  final bool isAdmin;
 
   /// HR / roster code when different from [id].
   final String? employeeCode;
@@ -48,6 +56,9 @@ class Employee extends Equatable {
     String? imageUrl,
     String? pin,
     bool? faceRegistered,
+    String? faceProfileHash,
+    bool clearFaceProfileHash = false,
+    bool? isAdmin,
     String? employeeCode,
     String? email,
     String? designation,
@@ -64,6 +75,10 @@ class Employee extends Equatable {
       imageUrl: imageUrl ?? this.imageUrl,
       pin: pin ?? this.pin,
       faceRegistered: faceRegistered ?? this.faceRegistered,
+      faceProfileHash: clearFaceProfileHash
+          ? null
+          : (faceProfileHash ?? this.faceProfileHash),
+      isAdmin: isAdmin ?? this.isAdmin,
       employeeCode: employeeCode ?? this.employeeCode,
       email: email ?? this.email,
       designation: designation ?? this.designation,
@@ -96,6 +111,8 @@ class Employee extends Equatable {
         imageUrl,
         pin,
         faceRegistered,
+        faceProfileHash,
+        isAdmin,
         employeeCode,
         email,
         designation,

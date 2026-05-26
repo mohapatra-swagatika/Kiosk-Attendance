@@ -1,4 +1,5 @@
 import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_config.dart';
+import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_organization.dart';
 
 /// Remote device registration — swap [MockRegistrationApi] for a real HTTP client later.
 abstract class RegistrationApi {
@@ -14,6 +15,7 @@ class RegistrationApiResult {
     this.adminEmail,
     this.logoUrl,
     this.brandingImageUrl,
+    this.organization,
     this.deviceId,
     this.deviceIdentifier,
     this.deviceToken,
@@ -36,6 +38,9 @@ class RegistrationApiResult {
   /// Remote branding assets; cached to local paths after registration.
   final String? logoUrl;
   final String? brandingImageUrl;
+
+  /// Pair API `data.organization` (tenant branding).
+  final KioskOrganization? organization;
 
   /// Pair API `data.deviceId` (UUID).
   final String? deviceId;

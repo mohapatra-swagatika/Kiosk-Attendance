@@ -30,6 +30,8 @@ dependencies:
   firebase_core: ^4.9.0
   firebase_app_installations: ^0.4.2+2
   http: ^1.4.0
+  connectivity_plus: ^6.1.4
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:
@@ -37,6 +39,9 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
 flutter:
+  config:
+    # Required for `flutter run` on a physical iPhone (VM service attach).
+    enable-lldb-debugging: true
   uses-material-design: true
   assets:
     - assets/models/

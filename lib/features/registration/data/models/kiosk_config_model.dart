@@ -1,4 +1,6 @@
 import 'package:attendance_kiosk_app/core/config/attendance_mode.dart';
+import 'package:attendance_kiosk_app/features/registration/data/models/kiosk_branding_fields_codec.dart';
+import 'package:attendance_kiosk_app/features/registration/data/models/kiosk_organization_model.dart';
 import 'package:attendance_kiosk_app/features/registration/domain/entities/kiosk_config.dart';
 
 class KioskConfigModel {
@@ -14,6 +16,7 @@ class KioskConfigModel {
     this.brandingImagePath,
     this.logoUrl,
     this.brandingImageUrl,
+    this.organization,
     this.attendanceMode = AttendanceMode.face,
     this.deviceId,
     this.deviceIdentifier,
@@ -34,6 +37,9 @@ class KioskConfigModel {
         brandingImagePath: e.brandingImagePath,
         logoUrl: e.logoUrl,
         brandingImageUrl: e.brandingImageUrl,
+        organization: e.organization != null
+            ? KioskOrganizationModel.fromEntity(e.organization!)
+            : null,
         attendanceMode: e.attendanceMode,
         deviceId: e.deviceId,
         deviceIdentifier: e.deviceIdentifier,
@@ -55,6 +61,7 @@ class KioskConfigModel {
       brandingImagePath: json['brandingImagePath'] as String?,
       logoUrl: json['logoUrl'] as String?,
       brandingImageUrl: json['brandingImageUrl'] as String?,
+      organization: _organizationFromJson(json),
       attendanceMode: AttendanceMode.fromStorage(json['attendanceMode'] as String?),
       deviceId: (json['deviceId'] ?? json['kioskId']) as String?,
       deviceIdentifier: json['deviceIdentifier'] as String?,
@@ -76,6 +83,7 @@ class KioskConfigModel {
   final String? brandingImagePath;
   final String? logoUrl;
   final String? brandingImageUrl;
+  final KioskOrganizationModel? organization;
   final AttendanceMode attendanceMode;
   final String? deviceId;
   final String? deviceIdentifier;
@@ -95,6 +103,7 @@ class KioskConfigModel {
         brandingImagePath: brandingImagePath,
         logoUrl: logoUrl,
         brandingImageUrl: brandingImageUrl,
+        organization: organization?.toEntity(),
         attendanceMode: attendanceMode,
         deviceId: deviceId,
         deviceIdentifier: deviceIdentifier,
@@ -115,6 +124,9 @@ class KioskConfigModel {
         if (brandingImagePath != null) 'brandingImagePath': brandingImagePath,
         if (logoUrl != null) 'logoUrl': logoUrl,
         if (brandingImageUrl != null) 'brandingImageUrl': brandingImageUrl,
+        ...KioskBrandingFieldsCodec.toJson(
+          KioskBrandingFieldsCodec.fromOrganization(organization?.toEntity()),
+        ),
         'attendanceMode': attendanceMode.storageValue,
         if (deviceId != null) 'deviceId': deviceId,
         if (deviceIdentifier != null) 'deviceIdentifier': deviceIdentifier,
@@ -122,4 +134,10 @@ class KioskConfigModel {
         if (apiBaseUrl != null) 'apiBaseUrl': apiBaseUrl,
         if (registeredAtIso != null) 'registeredAtIso': registeredAtIso,
       };
+
+  static KioskOrganizationModel? _organizationFromJson(Map<String, dynamic> json) {
+    final org = KioskBrandingFieldsCodec.fromJson(json).toOrganization();
+    if (org == null) return null;
+    return KioskOrganizationModel.fromEntity(org);
+  }
 }

@@ -7,6 +7,8 @@ import 'package:attendance_kiosk_app/features/auth/login/data/datasources/sessio
 import 'package:attendance_kiosk_app/features/auth/login/domain/entities/app_session.dart';
 import 'package:attendance_kiosk_app/features/auth/login/domain/repositories/auth_repository.dart';
 import 'package:attendance_kiosk_app/features/employees/data/datasources/employee_local_data_source.dart';
+import 'package:attendance_kiosk_app/core/config/kiosk_pin_policy.dart';
+import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/features/registration/data/datasources/kiosk_config_local_data_source.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
@@ -24,15 +26,28 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<Either<Failure, void>> loginWithPin(String pin) async {
     try {
       final normalized = pin.trim();
-      if (normalized.length < 4) {
-        return const Left(ValidationFailure('Enter a valid PIN'));
+      if (!KioskPinPolicy.isValidFormat(normalized)) {
+        return const Left(ValidationFailure('Enter a 7-digit PIN'));
+      }
+
+      final models = await _employees.readAll();
+      final employees = models.map((m) => m.toEntity()).toList();
+      final employee = KioskPinPolicy.findEmployeeByPin(employees, normalized);
+
+      if (employee != null) {
+        final isAdmin = employee.isAdmin;
+        await _session.saveSession(
+          AppSession(
+            displayName: employee.name,
+            role: isAdmin ? UserRole.admin : UserRole.employee,
+            employeeId: isAdmin ? null : employee.id,
+          ),
+        );
+        return const Right(null);
       }
 
       final config = await _kioskConfig.load();
-      final adminPin = config?.adminPin?.trim();
-      if (adminPin != null &&
-          adminPin.isNotEmpty &&
-          normalized == adminPin) {
+      if (KioskPinPolicy.isDeviceAdminPin(normalized, config?.adminPin)) {
         await _session.saveSession(
           AppSession(
             displayName: config?.adminName?.trim().isNotEmpty == true
@@ -44,22 +59,7 @@ class AuthRepositoryImpl implements AuthRepository {
         return const Right(null);
       }
 
-      final models = await _employees.readAll();
-      for (final model in models) {
-        if (model.pin.trim() == normalized) {
-          final employee = model.toEntity();
-          await _session.saveSession(
-            AppSession(
-              displayName: employee.name,
-              role: UserRole.employee,
-              employeeId: employee.id,
-            ),
-          );
-          return const Right(null);
-        }
-      }
-
-      return const Left(ValidationFailure('Invalid PIN — employee not found'));
+      return const Left(ValidationFailure(KioskPinStrings.invalidPin));
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     } catch (e) {

@@ -6,16 +6,25 @@ import 'package:attendance_kiosk_app/core/errors/failures.dart';
 import 'package:attendance_kiosk_app/core/ml/face_embedding_codec.dart';
 import 'package:attendance_kiosk_app/core/ml/face_profile_poses.dart';
 import 'package:attendance_kiosk_app/core/ml/face_match_debug_log.dart';
+import 'package:attendance_kiosk_app/core/api/employee_snapshot_parser.dart';
+import 'package:attendance_kiosk_app/core/api/face_profile_parser.dart';
+import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
+import 'package:attendance_kiosk_app/core/face_data_sync/domain/repositories/face_data_sync_repository.dart';
 import 'package:attendance_kiosk_app/features/employees/data/datasources/face_profile_local_data_source.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/repositories/employee_repository.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/repositories/face_repository.dart';
 
 /// Face gallery stored on-device; kiosk matches against an in-memory cache.
 class FaceRepositoryImpl implements FaceRepository {
-  FaceRepositoryImpl(this._profiles, this._employees);
+  FaceRepositoryImpl(
+    this._profiles,
+    this._employees, {
+    FaceDataSyncRepository? faceDataSync,
+  }) : _faceDataSync = faceDataSync;
 
   final FaceProfileLocalDataSource _profiles;
   final EmployeeRepository _employees;
+  final FaceDataSyncRepository? _faceDataSync;
 
   Map<String, Map<String, dynamic>>? _galleryCache;
   bool _emptyGalleryMatchLogged = false;
@@ -115,7 +124,30 @@ class FaceRepositoryImpl implements FaceRepository {
       if (kDebugMode) {
         debugPrint('FaceRepository: registered $employeeId (on-device)');
       }
-      return _markEmployeeFaceRegistered(employeeId, registered: true);
+
+      final markResult = await _markEmployeeFaceRegistered(employeeId, registered: true);
+      if (markResult.isLeft()) return markResult;
+
+      final syncRepo = _faceDataSync;
+      if (syncRepo != null) {
+        final syncResult = await syncRepo.enqueueAndSync(
+          employeeId: employeeId,
+          faceDataJson: Map<String, dynamic>.from(profile),
+        );
+        syncResult.fold(
+          (f) {
+            if (kDebugMode) {
+              debugPrint('[FaceDataSync] Queue failed: ${f.message}');
+            }
+          },
+          (enqueued) {
+            if (kDebugMode && enqueued) {
+              debugPrint('[FaceDataSync] Enqueued upload for $employeeId');
+            }
+          },
+        );
+      }
+      return const Right(null);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     }
@@ -125,13 +157,41 @@ class FaceRepositoryImpl implements FaceRepository {
   Future<Either<Failure, void>> resetFaceRegistration(String employeeId) async {
     try {
       final gallery = await _loadGallery(forceRefresh: true);
-      if (!gallery.containsKey(employeeId)) {
-        return _markEmployeeFaceRegistered(employeeId, registered: false);
+      if (gallery.containsKey(employeeId)) {
+        final updated = Map<String, Map<String, dynamic>>.from(gallery)
+          ..remove(employeeId);
+        await _profiles.writeGallery(updated);
+        _galleryCache = updated;
       }
-      final updated = Map<String, Map<String, dynamic>>.from(gallery)..remove(employeeId);
-      await _profiles.writeGallery(updated);
-      _galleryCache = updated;
-      return _markEmployeeFaceRegistered(employeeId, registered: false);
+
+      final markResult =
+          await _markEmployeeFaceRegistered(employeeId, registered: false);
+      if (markResult.isLeft()) return markResult;
+
+      final syncRepo = _faceDataSync;
+      if (syncRepo != null) {
+        final syncResult = await syncRepo.enqueueClearAndSync(
+          employeeId: employeeId,
+        );
+        syncResult.fold(
+          (f) {
+            if (kDebugMode) {
+              debugPrint('[FaceDataSync] Clear queue failed: ${f.message}');
+            }
+          },
+          (enqueued) {
+            if (kDebugMode) {
+              debugPrint(
+                enqueued
+                    ? '[FaceDataSync] Enqueued server face clear for $employeeId'
+                    : '[FaceDataSync] Server face clear already pending for $employeeId',
+              );
+            }
+          },
+        );
+      }
+
+      return const Right(null);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     }
@@ -219,20 +279,51 @@ class FaceRepositoryImpl implements FaceRepository {
 
   @override
   Future<Either<Failure, int>> importServerGallery(
-    Map<String, Map<String, dynamic>> profiles,
-  ) async {
+    Map<String, Map<String, dynamic>> serverProfiles, {
+    Set<String>? rosterEmployeeIds,
+  }) async {
     try {
-      final valid = <String, Map<String, dynamic>>{};
-      for (final entry in profiles.entries) {
-        final error = _validateNeuralProfile(entry.value);
-        if (error == null) {
-          valid[entry.key] = entry.value;
+      final existing = await _loadGallery(forceRefresh: true);
+      final merged = Map<String, Map<String, dynamic>>.from(existing);
+
+      var imported = 0;
+      var skipped = 0;
+      for (final entry in serverProfiles.entries) {
+        final parsed = FaceProfileParser.parse(entry.value);
+        if (parsed == null) {
+          skipped++;
+          if (kDebugMode) {
+            debugPrint(
+              '[FaceGallery] Skipped unparseable profile for ${entry.key}',
+            );
+          }
+          continue;
         }
+        if (_validateNeuralProfile(parsed) != null) {
+          skipped++;
+          continue;
+        }
+        merged[entry.key] = parsed;
+        imported++;
       }
-      await _profiles.writeGallery(valid);
-      _galleryCache = valid;
+      if (kDebugMode && skipped > 0) {
+        debugPrint('[FaceGallery] Skipped $skipped server profile(s)');
+      }
+
+      if (rosterEmployeeIds != null) {
+        merged.removeWhere((id, _) => !rosterEmployeeIds.contains(id));
+      }
+
+      await _profiles.writeGallery(merged);
+      _galleryCache = merged;
+      if (kDebugMode) {
+        debugPrint(
+          'FaceRepository: gallery ${merged.length} profile(s) '
+          '($imported from server)',
+        );
+      }
       await reconcileFaceRegistrationFlags();
-      return Right(valid.length);
+      return Right(imported);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     }
@@ -242,14 +333,22 @@ class FaceRepositoryImpl implements FaceRepository {
   Future<Either<Failure, void>> reconcileFaceRegistrationFlags() async {
     try {
       final gallery = await _loadGallery(forceRefresh: true);
-      final enrolledIds = gallery.keys.toSet();
       final employeesEither = await _employees.getEmployees();
       return employeesEither.fold(Left.new, (list) async {
         for (final e in list) {
-          final hasEmbedding = enrolledIds.contains(e.id);
-          if (e.faceRegistered != hasEmbedding) {
+          final profile = _galleryProfileForEmployee(e, gallery);
+          final hasEmbedding = profile != null;
+          final hash = hasEmbedding
+              ? FaceProfileParser.contentHash(profile)
+              : null;
+          if (e.faceRegistered != hasEmbedding ||
+              e.faceProfileHash != hash) {
             final result = await _employees.saveEmployee(
-              e.copyWith(faceRegistered: hasEmbedding),
+              e.copyWith(
+                faceRegistered: hasEmbedding,
+                faceProfileHash: hash,
+                clearFaceProfileHash: !hasEmbedding,
+              ),
             );
             if (result.isLeft()) return result;
           }
@@ -259,6 +358,16 @@ class FaceRepositoryImpl implements FaceRepository {
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     }
+  }
+
+  Map<String, dynamic>? _galleryProfileForEmployee(
+    Employee employee,
+    Map<String, Map<String, dynamic>> gallery,
+  ) {
+    final fromParser =
+        EmployeeSnapshotParser.profileForEmployee(employee, gallery);
+    if (fromParser != null) return fromParser;
+    return gallery[employee.id];
   }
 
   String? _validateNeuralProfile(Map<String, dynamic> profile) {
@@ -283,7 +392,18 @@ class FaceRepositoryImpl implements FaceRepository {
     return employeesEither.fold(Left.new, (list) async {
       final idx = list.indexWhere((e) => e.id == employeeId);
       if (idx < 0) return const Left(ValidationFailure('Employee not found'));
-      return _employees.saveEmployee(list[idx].copyWith(faceRegistered: registered));
+      final gallery = _galleryCache ?? await _loadGallery();
+      final profile = registered ? gallery[employeeId] : null;
+      final hash = profile != null
+          ? FaceProfileParser.contentHash(profile)
+          : null;
+      return _employees.saveEmployee(
+        list[idx].copyWith(
+          faceRegistered: registered,
+          faceProfileHash: hash,
+          clearFaceProfileHash: !registered,
+        ),
+      );
     });
   }
 }

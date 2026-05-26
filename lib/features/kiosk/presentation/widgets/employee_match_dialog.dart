@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_event_types.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/ml/face_embedding_codec.dart';
 import 'package:attendance_kiosk_app/features/attendance/domain/entities/attendance_log.dart';
+import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_events_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 
@@ -15,6 +17,7 @@ Future<void> showEmployeeMatchDialog({
   required AttendanceLog? activeLog,
   double? confidence,
   Future<String?> Function()? onCaptureAttendancePhoto,
+  String authMethod = KioskAuthMethods.face,
 }) {
   final now = DateTime.now();
   final dateFmt = DateFormat.yMMMEd();
@@ -153,7 +156,11 @@ Future<void> showEmployeeMatchDialog({
                       final photoPath = await onCaptureAttendancePhoto?.call();
                       final result = await ref
                           .read(attendanceRepositoryProvider)
-                          .checkIn(employee, photoPath: photoPath);
+                          .checkIn(
+                            employee,
+                            photoPath: photoPath,
+                            authMethod: authMethod,
+                          );
                       if (!ctx.mounted) return;
                       result.fold(
                         (f) {
@@ -164,6 +171,7 @@ Future<void> showEmployeeMatchDialog({
                         (_) {
                           ref.invalidate(attendanceLogsProvider);
                           ref.invalidate(activeCheckInsTodayProvider);
+                          ref.invalidate(kioskEventsPendingCountProvider);
                           Navigator.pop(ctx);
                           _showSuccess(ctx, MatchDialogStrings.checkInRecorded);
                         },
@@ -186,7 +194,11 @@ Future<void> showEmployeeMatchDialog({
                       final photoPath = await onCaptureAttendancePhoto?.call();
                       final result = await ref
                           .read(attendanceRepositoryProvider)
-                          .checkOut(employee, photoPath: photoPath);
+                          .checkOut(
+                            employee,
+                            photoPath: photoPath,
+                            authMethod: authMethod,
+                          );
                       if (!ctx.mounted) return;
                       result.fold(
                         (f) {
@@ -197,6 +209,7 @@ Future<void> showEmployeeMatchDialog({
                         (_) {
                           ref.invalidate(attendanceLogsProvider);
                           ref.invalidate(activeCheckInsTodayProvider);
+                          ref.invalidate(kioskEventsPendingCountProvider);
                           Navigator.pop(ctx);
                           _showSuccess(ctx, MatchDialogStrings.checkOutRecorded);
                         },
