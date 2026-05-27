@@ -81,7 +81,11 @@ Future<void> showEmployeeMatchDialog({
                 const SizedBox(height: 20),
                 _MatchDetailRow(
                   icon: Icons.badge_outlined,
-                  label: MatchDialogStrings.employeeId(employee.id),
+                  label: MatchDialogStrings.employeeId(
+                    employee.employeeCode?.isNotEmpty == true
+                        ? employee.employeeCode!
+                        : employee.id,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 _MatchDetailRow(

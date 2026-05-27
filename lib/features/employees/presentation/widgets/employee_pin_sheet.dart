@@ -39,7 +39,9 @@ Future<void> showEmployeePinSheet({
                 Text(
                   EmployeePinStrings.subtitle(
                     name: employee.name,
-                    id: employee.id,
+                    id: employee.employeeCode?.isNotEmpty == true
+                        ? employee.employeeCode!
+                        : employee.id,
                   ),
                   style: theme.textTheme.titleMedium?.copyWith(
                     color: scheme.onSurfaceVariant,

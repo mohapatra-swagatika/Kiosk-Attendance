@@ -1,8 +1,7 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -21,9 +20,9 @@ import 'package:attendance_kiosk_app/core/ml/face_id_live_metrics.dart';
 import 'package:attendance_kiosk_app/core/ml/face_registration_session.dart';
 import 'package:attendance_kiosk_app/core/ml/face_track_smoother.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_analyzer.dart';
-import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 import 'package:attendance_kiosk_app/core/errors/failures.dart';
 import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
+import 'package:attendance_kiosk_app/app/bootstrap.dart' show appFaceEmbedder;
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
@@ -60,6 +59,10 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
   DateTime _lastMlAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime? _mlStreamStartedAt;
   bool _mlKitPrimed = false;
+  bool _mlPrimeInProgress = false;
+  bool _mlWarmupComplete = false;
+  String? _employeeDisplayName;
+  String? _employeeDisplayCode;
   Ticker? _uiTicker;
   double _lastRingShown = 0;
   Offset? _smoothedFaceDot;
@@ -108,8 +111,43 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _uiTicker = createTicker(_onUiTick)..start();
+    _resolveEmployeeDisplayName();
     unawaited(_init());
   }
+
+  void _resolveEmployeeDisplayName() {
+    final employees = ref.read(employeesListProvider).valueOrNull;
+    if (employees != null) {
+      for (final e in employees) {
+        if (e.id == widget.employeeId) {
+          _employeeDisplayName = e.name.trim().isNotEmpty ? e.name.trim() : null;
+          _employeeDisplayCode = e.employeeCode?.isNotEmpty == true
+              ? e.employeeCode!
+              : null;
+          return;
+        }
+      }
+    }
+    unawaited(
+      ref.read(employeeByIdProvider(widget.employeeId).future).then((employee) {
+        if (!mounted || employee == null) return;
+        final name = employee.name.trim();
+        if (name.isNotEmpty) {
+          setState(() => _employeeDisplayName = name);
+        }
+        final code = employee.employeeCode?.trim();
+        if (code != null && code.isNotEmpty) {
+          setState(() => _employeeDisplayCode = code);
+        }
+      }),
+    );
+  }
+
+  String get _snackbarEmployeeLabel =>
+      _employeeDisplayName ?? widget.employeeId;
+
+  String get _alreadyEnrolledLabel =>
+      _employeeDisplayCode ?? widget.employeeId;
 
   /// Keeps the ring filling smoothly between ML Kit frames (~60fps).
   void _onUiTick(Duration _) {
@@ -128,22 +166,10 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
 
   Future<void> _init() async {
     final faceRepo = ref.read(faceRepositoryProvider);
-    final hasFace = await faceRepo.hasRegisteredFace(widget.employeeId);
-    hasFace.fold((_) {}, (exists) {
-      if (exists && mounted) {
-        setState(() {
-          _blocked = true;
-          _blockedTitle = FaceRegistrationStrings.alreadyEnrolledTitle;
-          _status = FaceRegistrationStrings.alreadyEnrolledBody(
-            widget.employeeId,
-          );
-          _detail = FaceRegistrationStrings.alreadyEnrolledHint;
-        });
-      }
-    });
-    if (_blocked) return;
+    final permFuture = Permission.camera.request();
+    final hasFaceFuture = faceRepo.hasRegisteredFace(widget.employeeId);
 
-    final perm = await Permission.camera.request();
+    final perm = await permFuture;
     if (!perm.isGranted) {
       if (!mounted) return;
       setState(() {
@@ -154,7 +180,29 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       return;
     }
 
+    final hasFace = await hasFaceFuture;
+    hasFace.fold((_) {}, (exists) {
+      if (exists && mounted) {
+        setState(() {
+          _blocked = true;
+          _blockedTitle = FaceRegistrationStrings.alreadyEnrolledTitle;
+          _status = FaceRegistrationStrings.alreadyEnrolledBody(
+            _alreadyEnrolledLabel,
+          );
+          _detail = FaceRegistrationStrings.alreadyEnrolledHint;
+        });
+      }
+    });
+    if (_blocked) return;
+
     try {
+      if (mounted) {
+        setState(() {
+          _status = FaceRegistrationStrings.preparingCamera;
+          _detail = 'Opening front camera…';
+        });
+      }
+
       final controller = await CameraSessionHelper.openFrontCamera();
       if (!mounted) return;
 
@@ -170,25 +218,41 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       setState(() {
         _camera = controller;
         _status = FaceRegistrationStrings.preparingCamera;
-        _detail = FaceRegistrationStrings.preparingFaceScanner;
+        _detail = 'Starting preview…';
       });
 
-      _mlKitPrimed = await _primeEnrollmentMlKit(controller);
+      // Ensure the preview has at least one frame painted before we start
+      // any ML work (first ML Kit inference can be slow).
+      await SchedulerBinding.instance.endOfFrame;
 
       if (!mounted) return;
+
+      // Lazily load the TFLite face embedder here (NOT during app startup).
+      // On some iOS devices the interpreter creation can block for several seconds,
+      // so we do it inside the enrollment flow with visible progress.
+      if (!appFaceEmbedder.isReady) {
+        if (mounted) {
+          setState(() {
+            _status = FaceRegistrationStrings.preparingFaceScanner;
+            _detail = 'Loading face recognition model…';
+          });
+        }
+        await appFaceEmbedder.initialize();
+      }
 
       await CameraSessionHelper.startImageStreamAfterPreview(
         controller: controller,
         previewDelay: CameraSessionHelper.enrollmentPreviewDelay(),
         onFrame: _onEnrollmentFrame,
       );
-      _mlStreamStartedAt = DateTime.now();
 
-      if (!mounted) return;
-      setState(() {
-        _status = FaceRegistrationStrings.faceIdPositionFace;
-        _detail = null;
-      });
+      _mlStreamStartedAt = DateTime.now();
+      if (mounted) {
+        setState(() {
+          _status = FaceRegistrationStrings.faceIdPositionFace;
+          _detail = FaceRegistrationStrings.preparingFaceScanner;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -196,27 +260,6 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
         _blockedTitle = FaceRegistrationStrings.cameraRequiredTitle;
         _status = 'Could not start camera: $e';
       });
-    }
-  }
-
-  /// Loads ML Kit on a still frame before the live stream (avoids freezing preview).
-  Future<bool> _primeEnrollmentMlKit(CameraController controller) async {
-    try {
-      final still = await CameraSessionHelper.takeStillPicture(controller);
-      if (still == null) return false;
-      try {
-        await MlKitEnrollmentFaceDetector.instance.primeFromFile(still.path);
-        return MlKitEnrollmentFaceDetector.instance.isModelPrimed;
-      } finally {
-        try {
-          await File(still.path).delete();
-        } catch (_) {}
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[FaceRegistration] ML Kit prime failed: $e');
-      }
-      return false;
     }
   }
 
@@ -249,6 +292,34 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     if (clone == null) return;
 
     try {
+      // First-time ML Kit inference can take ~20–30s on some iOS devices.
+      // Run a one-time warm-up pass while keeping the preview visible.
+      if (!_mlWarmupComplete) {
+        if (_mlPrimeInProgress) return;
+        _mlPrimeInProgress = true;
+        try {
+          if (mounted) {
+            setState(() {
+              _status = FaceRegistrationStrings.preparingFaceScanner;
+              _detail =
+                  'Warming up face scanner (first time only)… Please wait.';
+            });
+          }
+          final warm = await _analyzer.analyzeClone(clone);
+          _mlKitPrimed = warm.faceCount >= 0; // any result implies model loaded
+          _mlWarmupComplete = true;
+          if (mounted) {
+            setState(() {
+              _status = FaceRegistrationStrings.faceIdPositionFace;
+              _detail = null;
+            });
+          }
+        } finally {
+          _mlPrimeInProgress = false;
+        }
+        return;
+      }
+
       final analysis = await _analyzer.analyzeClone(clone);
       if (_disposed || !mounted) return;
 
@@ -392,7 +463,7 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              FaceRegistrationStrings.savedSnackbar(widget.employeeId),
+              FaceRegistrationStrings.savedSnackbar(_snackbarEmployeeLabel),
             ),
           ),
         );

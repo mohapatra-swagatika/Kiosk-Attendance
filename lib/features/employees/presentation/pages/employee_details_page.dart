@@ -237,7 +237,6 @@ class _EmployeeInfo extends ConsumerWidget {
                   style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 12),
-                _DetailRow(label: 'ID', value: employee.id),
                 if (employee.employeeCode != null && employee.employeeCode!.isNotEmpty)
                   _DetailRow(
                     label: EmployeeDetailsStrings.labelEmployeeCode,

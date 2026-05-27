@@ -218,7 +218,7 @@ class EmployeesStrings {
 class EmployeeCardStrings {
   EmployeeCardStrings._();
 
-  static String idTag(String id) => 'ID $id';
+  static String idTag(String id) => 'Code $id';
   static const String faceRegistered = 'Face registered';
   static const String faceNotConfigured = 'Face not configured';
   static const String viewDetailsButton = 'View details';
@@ -305,8 +305,8 @@ class FaceRegistrationStrings {
   static const String saveFailed = 'Could not save Face ID. Try again.';
   static const String saveFailedHint =
       'Tap "View match details" for scores (also in debug console).';
-  static String savedSnackbar(String employeeId) =>
-      'Face ID set up for $employeeId';
+  static String savedSnackbar(String employeeName) =>
+      'Face ID registered successfully for $employeeName';
 
   static const String debugDialogTitle = 'Face match debug';
   static const String unavailable = 'Unavailable';
@@ -375,7 +375,7 @@ class KioskStrings {
 class MatchDialogStrings {
   MatchDialogStrings._();
 
-  static String employeeId(String id) => 'Employee ID: $id';
+  static String employeeId(String id) => 'Employee Code: $id';
   static String department(String dept) => 'Department: $dept';
   static String date(String date) => 'Date: $date';
   static String time(String time) => 'Time: $time';

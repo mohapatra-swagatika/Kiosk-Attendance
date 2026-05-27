@@ -175,7 +175,17 @@ class _EmployeeDetailsCard extends StatelessWidget {
                         ),
                   ),
                   const SizedBox(height: 8),
-                  _detailRow(context, EmployeeCardStrings.idTag(employee.id), employee.id),
+                  _detailRow(
+                    context,
+                    EmployeeCardStrings.idTag(
+                      employee.employeeCode?.isNotEmpty == true
+                          ? employee.employeeCode!
+                          : employee.id,
+                    ),
+                    employee.employeeCode?.isNotEmpty == true
+                        ? employee.employeeCode!
+                        : employee.id,
+                  ),
                   _detailRow(context, EmployeePortalStrings.departmentLabel, employee.department),
                   _detailRow(
                     context,

@@ -56,6 +56,7 @@ class AttendanceLogDetailCard extends StatelessWidget {
     super.key,
     required this.log,
     this.showEmployee = false,
+    this.employeeCodeForDisplay,
     this.timeFormat,
     this.filterDay,
     this.useDateAsTitle = false,
@@ -63,6 +64,9 @@ class AttendanceLogDetailCard extends StatelessWidget {
 
   final AttendanceLog log;
   final bool showEmployee;
+  /// When [showEmployee] is true, shows this code instead of [log.employeeId].
+  /// Falls back to [log.employeeId] if null/empty.
+  final String? employeeCodeForDisplay;
   final DateFormat? timeFormat;
 
   /// When set, hides the date line if the log falls on this day (admin date filter).
@@ -80,6 +84,10 @@ class AttendanceLogDetailCard extends StatelessWidget {
     final duration = attendanceDurationLabel(log);
     final showDateLine =
         useDateAsTitle || filterDay == null || !_isSameDay(log.checkInTime, filterDay!);
+    final displayEmployeeId =
+        (employeeCodeForDisplay != null && employeeCodeForDisplay!.isNotEmpty)
+            ? employeeCodeForDisplay!
+            : log.employeeId;
 
     return Card(
       child: Padding(
@@ -102,7 +110,7 @@ class AttendanceLogDetailCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      log.employeeId,
+                      displayEmployeeId,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),

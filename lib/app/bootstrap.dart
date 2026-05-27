@@ -15,7 +15,7 @@ final TfliteFaceEmbedder appFaceEmbedder = TfliteFaceEmbedder();
 /// True after [bootstrap] completes successfully.
 bool appMlBootstrapComplete = false;
 
-/// Initializes Firebase, storage, and TFLite without blocking the first frame.
+/// Initializes Firebase + local storage without blocking the first frame.
 ///
 /// ML Kit is **not** warmed up here — a dummy `processImage` call can freeze iOS
 /// for 15–20s on the main thread. The first real camera frame primes the detector.
@@ -46,18 +46,12 @@ Future<String?> bootstrap({
     return 'Storage init failed: $e';
   }
 
-  onStatus?.call('Loading face recognition model…');
-  final tfliteReady = await appFaceEmbedder.initialize();
-  if (!tfliteReady) {
-    final detail = appFaceEmbedder.loadError ?? 'unknown error';
-    return 'MobileFaceNet model is required for face recognition.\n\n'
-        '1. Download mobile_face_net.tflite (192-dim, 112×112 input)\n'
-        '2. Place it in: assets/models/mobile_face_net.tflite\n'
-        '3. Run: ./scripts/download_mobilefacenet.sh\n'
-        '4. Full rebuild: flutter clean && flutter run\n\n'
-        'See assets/models/README.md\n\n'
-        'Load error: $detail';
-  }
+  // Do NOT load the TFLite interpreter here.
+  // Interpreter creation can block the UI thread for several seconds on iOS,
+  // which makes first-launch navigation + text input feel frozen.
+  //
+  // The kiosk + enrollment flows will initialize [appFaceEmbedder] lazily and
+  // show user-facing progress messaging while it loads.
   FaceEmbeddingCodec.setMode(FaceEmbeddingMode.tflite);
   appMlBootstrapComplete = true;
 

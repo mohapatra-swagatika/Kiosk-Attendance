@@ -57,53 +57,60 @@ class KioskDrawerContent extends ConsumerWidget {
             ),
           ),
           const Divider(height: 1),
-          if (isAdmin) ...[
-            _tile(
-              context,
-              icon: Icons.dashboard_rounded,
-              label: AppStrings.home,
-              path: RoutePaths.home,
-              selected: location == RoutePaths.home,
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                if (isAdmin) ...[
+                  _tile(
+                    context,
+                    icon: Icons.dashboard_rounded,
+                    label: AppStrings.home,
+                    path: RoutePaths.home,
+                    selected: location == RoutePaths.home,
+                  ),
+                  _tile(
+                    context,
+                    icon: Icons.groups_rounded,
+                    label: AppStrings.employees,
+                    path: RoutePaths.employees,
+                    selected: RoutePaths.isEmployeesArea(location),
+                  ),
+                  _tile(
+                    context,
+                    icon: Icons.fact_check_rounded,
+                    label: AppStrings.attendance,
+                    path: RoutePaths.attendance,
+                    selected: location == RoutePaths.attendance,
+                  ),
+                  _tile(
+                    context,
+                    icon: Icons.settings_outlined,
+                    label: KioskSidebarStrings.settings,
+                    path: RoutePaths.settings,
+                    selected: location == RoutePaths.settings,
+                  ),
+                  const SyncStatusFooter(),
+                ] else ...[
+                  _tile(
+                    context,
+                    icon: Icons.dashboard_rounded,
+                    label: EmployeePortalStrings.dashboardTab,
+                    path: RoutePaths.employeeHome,
+                    selected: location == RoutePaths.employeeHome,
+                  ),
+                  _tile(
+                    context,
+                    icon: Icons.fact_check_rounded,
+                    label: EmployeePortalStrings.attendanceTab,
+                    path: RoutePaths.employeeAttendance,
+                    selected: location == RoutePaths.employeeAttendance,
+                  ),
+                ],
+              ],
             ),
-            _tile(
-              context,
-              icon: Icons.groups_rounded,
-              label: AppStrings.employees,
-              path: RoutePaths.employees,
-              selected: RoutePaths.isEmployeesArea(location),
-            ),
-            _tile(
-              context,
-              icon: Icons.fact_check_rounded,
-              label: AppStrings.attendance,
-              path: RoutePaths.attendance,
-              selected: location == RoutePaths.attendance,
-            ),
-            _tile(
-              context,
-              icon: Icons.settings_outlined,
-              label: KioskSidebarStrings.settings,
-              path: RoutePaths.settings,
-              selected: location == RoutePaths.settings,
-            ),
-          ] else ...[
-            _tile(
-              context,
-              icon: Icons.dashboard_rounded,
-              label: EmployeePortalStrings.dashboardTab,
-              path: RoutePaths.employeeHome,
-              selected: location == RoutePaths.employeeHome,
-            ),
-            _tile(
-              context,
-              icon: Icons.fact_check_rounded,
-              label: EmployeePortalStrings.attendanceTab,
-              path: RoutePaths.employeeAttendance,
-              selected: location == RoutePaths.employeeAttendance,
-            ),
-          ],
-          const Spacer(),
-          if (isAdmin) const SyncStatusFooter(),
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.logout_rounded),
             title: Text(AppStrings.signOut),

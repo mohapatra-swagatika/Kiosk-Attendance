@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,11 +12,12 @@ import 'package:attendance_kiosk_app/core/responsive/responsive_builder.dart';
 import 'package:attendance_kiosk_app/core/widgets/app_error_view.dart';
 import 'package:attendance_kiosk_app/core/widgets/app_loading.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
+import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
-import 'package:attendance_kiosk_app/features/employees/domain/entities/employee_sync_result.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_sync_providers.dart';
-import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
+import 'package:attendance_kiosk_app/features/employees/presentation/utils/employee_search_filter.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/widgets/employee_card.dart';
+import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
 /// Employee roster from local Hive storage with tablet-responsive cards.
 class EmployeesPage extends ConsumerStatefulWidget {
@@ -27,50 +29,44 @@ class EmployeesPage extends ConsumerStatefulWidget {
 
 class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   final _searchController = TextEditingController();
+  final _debouncedQuery = ValueNotifier<String>('');
   Timer? _searchDebounce;
 
-  static const _searchDebounceDuration = Duration(milliseconds: 250);
+  List<Employee>? _indexedRoster;
+  List<EmployeeSearchIndexEntry>? _searchIndex;
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _alignSearchFieldWithProvider();
-    });
-  }
+  static const _searchDebounceDuration = Duration(milliseconds: 300);
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _debouncedQuery.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  /// Empty controller vs restored provider (e.g. after route pop).
-  void _alignSearchFieldWithProvider() {
-    final query = ref.read(employeeSearchQueryProvider);
-    if (query.isEmpty) return;
-    if (_searchController.text == query) return;
-    _searchController.text = query;
+  void _ensureSearchIndex(List<Employee> roster) {
+    if (identical(_indexedRoster, roster)) return;
+    _indexedRoster = roster;
+    _searchIndex = EmployeeSearchFilter.buildIndex(roster);
   }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
     if (value.trim().isEmpty) {
-      ref.read(employeeSearchQueryProvider.notifier).state = '';
+      _debouncedQuery.value = '';
       return;
     }
     _searchDebounce = Timer(_searchDebounceDuration, () {
       if (!mounted) return;
-      ref.read(employeeSearchQueryProvider.notifier).state = value;
+      _debouncedQuery.value = value;
     });
   }
 
   void _clearSearch() {
     _searchDebounce?.cancel();
     _searchController.clear();
-    ref.read(employeeSearchQueryProvider.notifier).state = '';
+    _debouncedQuery.value = '';
   }
 
   Future<void> _syncEmployees() async {
@@ -111,97 +107,49 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(filteredEmployeesListProvider);
     final rosterAsync = ref.watch(employeesListProvider);
-    final syncState = ref.watch(employeeSyncNotifierProvider);
-    final hasActiveSearch = ref.watch(employeeSearchQueryProvider).trim().isNotEmpty;
-    final totalCount = rosterAsync.valueOrNull?.length ?? 0;
-    final isSyncing = syncState.isSyncing;
 
-    return async.when(
-      data: (employees) {
-        if (totalCount == 0) {
-          return _EmployeesSearchScaffold(
-            searchController: _searchController,
-            onSearchChanged: _onSearchChanged,
-            onClearSearch: _clearSearch,
-            syncing: isSyncing,
-            syncMetadata: syncState.metadata,
-            onSync: _syncEmployees,
-            child: const Center(child: Text(EmployeesStrings.empty)),
-          );
-        }
-        if (employees.isEmpty && hasActiveSearch) {
-          return _EmployeesSearchScaffold(
-            searchController: _searchController,
-            onSearchChanged: _onSearchChanged,
-            onClearSearch: _clearSearch,
-            syncing: isSyncing,
-            syncMetadata: syncState.metadata,
-            onSync: _syncEmployees,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  EmployeesStrings.noSearchResults,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-          );
-        }
+    return rosterAsync.when(
+      data: (roster) {
+        _ensureSearchIndex(roster);
+
         return _EmployeesSearchScaffold(
           searchController: _searchController,
           onSearchChanged: _onSearchChanged,
           onClearSearch: _clearSearch,
-          syncing: isSyncing,
-          syncMetadata: syncState.metadata,
           onSync: _syncEmployees,
-          child: ResponsiveBuilder(
-            builder: (context, bp, constraints) {
-              final crossCount = switch (bp) {
-                AppBreakpointSize.compact => 1,
-                AppBreakpointSize.medium => 2,
-                AppBreakpointSize.expanded => 3,
-              };
-              final pad = switch (bp) {
-                AppBreakpointSize.compact => 16.0,
-                AppBreakpointSize.medium => 24.0,
-                AppBreakpointSize.expanded => 28.0,
-              };
-              const gridSpacing = 16.0;
-              final contentWidth = constraints.maxWidth - pad * 2;
-              final itemWidth = crossCount <= 1
-                  ? contentWidth
-                  : (contentWidth - gridSpacing * (crossCount - 1)) / crossCount;
+          child: ValueListenableBuilder<String>(
+            valueListenable: _debouncedQuery,
+            builder: (context, query, _) {
+              final filtered = EmployeeSearchFilter.applyIndex(
+                roster,
+                _searchIndex!,
+                query,
+              );
+              final hasActiveSearch = query.trim().isNotEmpty;
 
-              return CustomScrollView(
-                slivers: [
-                  SliverPadding(
-                    padding: EdgeInsets.fromLTRB(pad, 8, pad, pad + 24),
-                    sliver: SliverToBoxAdapter(
-                      child: Wrap(
-                        spacing: gridSpacing,
-                        runSpacing: gridSpacing,
-                        children: [
-                          for (final e in employees)
-                            SizedBox(
-                              width: itemWidth,
-                              child: EmployeeCard(
-                                employee: e,
-                                compact: crossCount == 1,
-                                onViewDetails: () => context.push(
-                                  RoutePaths.employeeDetailPath(e.id),
-                                  extra: e,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
+              if (roster.isEmpty) {
+                return const Center(child: Text(EmployeesStrings.empty));
+              }
+              if (filtered.isEmpty && hasActiveSearch) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      EmployeesStrings.noSearchResults,
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
                     ),
                   ),
-                ],
+                );
+              }
+
+              return _EmployeesRosterGrid(
+                employees: filtered,
+                onViewDetails: (employee) => context.push(
+                  RoutePaths.employeeDetailPath(employee.id),
+                  extra: employee,
+                ),
               );
             },
           ),
@@ -216,13 +164,86 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   }
 }
 
+/// Virtualized grid; only rebuilds when [employees] changes.
+class _EmployeesRosterGrid extends StatelessWidget {
+  const _EmployeesRosterGrid({
+    required this.employees,
+    required this.onViewDetails,
+  });
+
+  final List<Employee> employees;
+  final void Function(Employee employee) onViewDetails;
+
+  static const _gridSpacing = 16.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return ResponsiveBuilder(
+      builder: (context, bp, constraints) {
+        final crossCount = switch (bp) {
+          AppBreakpointSize.compact => 1,
+          AppBreakpointSize.medium => 2,
+          AppBreakpointSize.expanded => 3,
+        };
+        final pad = switch (bp) {
+          AppBreakpointSize.compact => 16.0,
+          AppBreakpointSize.medium => 24.0,
+          AppBreakpointSize.expanded => 28.0,
+        };
+        final contentWidth = constraints.maxWidth - pad * 2;
+        final itemWidth = crossCount <= 1
+            ? contentWidth
+            : (contentWidth - _gridSpacing * (crossCount - 1)) / crossCount;
+        final rowCount = (employees.length + crossCount - 1) ~/ crossCount;
+
+        return CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(pad, 8, pad, pad + 24),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, rowIndex) {
+                    final start = rowIndex * crossCount;
+                    final end = math.min(start + crossCount, employees.length);
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: rowIndex < rowCount - 1 ? _gridSpacing : 0,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (var i = start; i < end; i++) ...[
+                            if (i > start) const SizedBox(width: _gridSpacing),
+                            SizedBox(
+                              width: itemWidth,
+                              child: EmployeeCard(
+                                key: ValueKey(employees[i].id),
+                                employee: employees[i],
+                                compact: crossCount == 1,
+                                onViewDetails: () => onViewDetails(employees[i]),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                  childCount: rowCount,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _EmployeesSearchScaffold extends StatelessWidget {
   const _EmployeesSearchScaffold({
     required this.searchController,
     required this.onSearchChanged,
     required this.onClearSearch,
-    required this.syncing,
-    required this.syncMetadata,
     required this.onSync,
     required this.child,
   });
@@ -230,95 +251,121 @@ class _EmployeesSearchScaffold extends StatelessWidget {
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onClearSearch;
-  final bool syncing;
-  final EmployeeSyncMetadata syncMetadata;
   final VoidCallback onSync;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final lastAt = syncMetadata.lastSyncedAt;
-    final lastError = syncMetadata.lastError;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(EmployeesStrings.title, style: textTheme.headlineMedium),
-              const SizedBox(height: 6),
-              Text(EmployeesStrings.subtitle, style: textTheme.bodyLarge),
-              const SizedBox(height: 12),
-              SearchBar(
-                controller: searchController,
-                hintText: EmployeesStrings.searchHint,
-                leading: const Icon(Icons.search),
-                trailing: [
-                  ListenableBuilder(
-                    listenable: searchController,
-                    builder: (context, _) {
-                      if (searchController.text.isEmpty) {
-                        return const SizedBox.shrink();
-                      }
-                      return IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: onClearSearch,
-                        tooltip: MaterialLocalizations.of(context).clearButtonTooltip,
-                      );
-                    },
-                  ),
-                ],
-                onChanged: onSearchChanged,
-                elevation: WidgetStateProperty.all(0),
-                backgroundColor: WidgetStateProperty.all(
-                  scheme.surfaceContainerHighest,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilledButton.tonalIcon(
-                  onPressed: syncing ? null : onSync,
-                  icon: syncing
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.cloud_download_outlined),
-                  label: Text(
-                    syncing ? EmployeesStrings.syncInProgress : EmployeesStrings.syncEmployees,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                lastAt == null
-                    ? EmployeesStrings.syncNever
-                    : EmployeesStrings.lastSynced(
-                        DateFormat.yMMMd().add_jm().format(lastAt),
-                      ),
-                style: textTheme.bodySmall?.copyWith(
-                  color: lastError != null ? scheme.error : scheme.onSurfaceVariant,
-                ),
-              ),
-              if (lastError != null && !syncing) ...[
-                const SizedBox(height: 4),
-                Text(
-                  lastError,
-                  style: textTheme.bodySmall?.copyWith(color: scheme.error),
-                ),
-              ],
-            ],
-          ),
+        _EmployeesSearchHeader(
+          searchController: searchController,
+          onSearchChanged: onSearchChanged,
+          onClearSearch: onClearSearch,
+          onSync: onSync,
         ),
         Expanded(child: child),
       ],
+    );
+  }
+}
+
+/// Title, search field, and sync controls — sync state isolated here.
+class _EmployeesSearchHeader extends ConsumerWidget {
+  const _EmployeesSearchHeader({
+    required this.searchController,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onSync,
+  });
+
+  final TextEditingController searchController;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
+  final VoidCallback onSync;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final syncState = ref.watch(employeeSyncNotifierProvider);
+    final syncing = syncState.isSyncing;
+    final syncMetadata = syncState.metadata;
+    final lastAt = syncMetadata.lastSyncedAt;
+    final lastError = syncMetadata.lastError;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(EmployeesStrings.title, style: textTheme.headlineMedium),
+          const SizedBox(height: 6),
+          Text(EmployeesStrings.subtitle, style: textTheme.bodyLarge),
+          const SizedBox(height: 12),
+          SearchBar(
+            controller: searchController,
+            hintText: EmployeesStrings.searchHint,
+            leading: const Icon(Icons.search),
+            trailing: [
+              ListenableBuilder(
+                listenable: searchController,
+                builder: (context, _) {
+                  if (searchController.text.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  return IconButton(
+                    icon: const Icon(Icons.clear),
+                    onPressed: onClearSearch,
+                    tooltip: MaterialLocalizations.of(context).clearButtonTooltip,
+                  );
+                },
+              ),
+            ],
+            onChanged: onSearchChanged,
+            elevation: WidgetStateProperty.all(0),
+            backgroundColor: WidgetStateProperty.all(
+              scheme.surfaceContainerHighest,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: syncing ? null : onSync,
+              icon: syncing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.cloud_download_outlined),
+              label: Text(
+                syncing ? EmployeesStrings.syncInProgress : EmployeesStrings.syncEmployees,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            lastAt == null
+                ? EmployeesStrings.syncNever
+                : EmployeesStrings.lastSynced(
+                    DateFormat.yMMMd().add_jm().format(lastAt),
+                  ),
+            style: textTheme.bodySmall?.copyWith(
+              color: lastError != null ? scheme.error : scheme.onSurfaceVariant,
+            ),
+          ),
+          if (lastError != null && !syncing) ...[
+            const SizedBox(height: 4),
+            Text(
+              lastError,
+              style: textTheme.bodySmall?.copyWith(color: scheme.error),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

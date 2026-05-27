@@ -14,7 +14,6 @@ import 'package:attendance_kiosk_app/core/sync/sync_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/domain/entities/attendance_log.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_filter_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
-import 'package:attendance_kiosk_app/features/employees/presentation/utils/employee_search_filter.dart';
 import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
 final employeeLocalDataSourceProvider = Provider<EmployeeLocalDataSource>((ref) {
@@ -50,23 +49,6 @@ final defaultDummyEmployeesProvider = Provider<List<Employee>>((ref) {
 
 final saveEmployeeUseCaseProvider = Provider<SaveEmployeeUseCase>((ref) {
   return SaveEmployeeUseCase(ref.watch(employeeRepositoryProvider));
-});
-
-/// Debounced query from the employees screen search field.
-/// Auto-dispose clears stale filters when leaving [EmployeesPage].
-final employeeSearchQueryProvider =
-    StateProvider.autoDispose<String>((ref) => '');
-
-/// Roster filtered by [employeeSearchQueryProvider] (name + department).
-final filteredEmployeesListProvider =
-    Provider.autoDispose<AsyncValue<List<Employee>>>((ref) {
-  final roster = ref.watch(employeesListProvider);
-  final query = ref.watch(employeeSearchQueryProvider);
-  return roster.when(
-    data: (list) => AsyncData(EmployeeSearchFilter.apply(list, query)),
-    loading: () => const AsyncLoading(),
-    error: (e, st) => AsyncError(e, st),
-  );
 });
 
 final employeesListProvider = FutureProvider<List<Employee>>((ref) async {

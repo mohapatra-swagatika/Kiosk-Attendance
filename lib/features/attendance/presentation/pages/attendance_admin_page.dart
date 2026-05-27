@@ -7,6 +7,7 @@ import 'package:attendance_kiosk_app/core/responsive/responsive_builder.dart';
 import 'package:attendance_kiosk_app/core/widgets/app_error_view.dart';
 import 'package:attendance_kiosk_app/core/widgets/app_loading.dart';
 import 'package:attendance_kiosk_app/core/widgets/dashboard/dashboard.dart';
+import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_filter_providers.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/widgets/attendance_log_detail_card.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
@@ -28,6 +29,7 @@ class _AttendanceAdminPageState extends ConsumerState<AttendanceAdminPage> {
   Widget build(BuildContext context) {
     final logsAsync = ref.watch(attendanceLogsForDateProvider(_selectedDay));
     final activeAsync = ref.watch(activeCheckInsTodayProvider);
+    final rosterAsync = ref.watch(employeesListProvider);
     final timeFmt = DateFormat('h:mm a');
     final dateLabel = DateFormat.yMMMEd().format(_selectedDay);
 
@@ -47,6 +49,17 @@ class _AttendanceAdminPageState extends ConsumerState<AttendanceAdminPage> {
               final activeForDay = active
                   .where((l) => l.date == attendanceDateKey(_selectedDay))
                   .toList();
+
+              final roster = rosterAsync.valueOrNull;
+              final codeByEmployeeId = <String, String>{};
+              if (roster != null) {
+                for (final e in roster) {
+                  final code = e.employeeCode?.isNotEmpty == true
+                      ? e.employeeCode!
+                      : e.id;
+                  codeByEmployeeId[e.id] = code;
+                }
+              }
 
               return ResponsiveBuilder(
                 builder: (context, bp, _) {
@@ -103,6 +116,8 @@ class _AttendanceAdminPageState extends ConsumerState<AttendanceAdminPage> {
                                 showEmployee: true,
                                 timeFormat: timeFmt,
                                 filterDay: _selectedDay,
+                                employeeCodeForDisplay:
+                                    codeByEmployeeId[l.employeeId],
                               ),
                             ),
                           ),
@@ -127,6 +142,8 @@ class _AttendanceAdminPageState extends ConsumerState<AttendanceAdminPage> {
                                 showEmployee: true,
                                 timeFormat: timeFmt,
                                 filterDay: _selectedDay,
+                                employeeCodeForDisplay:
+                                    codeByEmployeeId[l.employeeId],
                               ),
                             ),
                           ),

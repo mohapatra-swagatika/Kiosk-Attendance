@@ -12,6 +12,7 @@ import 'package:attendance_kiosk_app/core/camera/camera_scan_lifecycle.dart';
 import 'package:attendance_kiosk_app/core/camera/kiosk_attendance_photo_capture.dart';
 import 'package:attendance_kiosk_app/core/camera/camera_session_helper.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
+import 'package:attendance_kiosk_app/app/bootstrap.dart' show appFaceEmbedder;
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
@@ -81,6 +82,15 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
     );
 
     unawaited(_initCamera());
+
+    // Lazily load the TFLite embedder inside kiosk flow to avoid blocking
+    // app startup / navigation / text input on first launch.
+    if (!appFaceEmbedder.isReady) {
+      _ui.setInitializing('Loading face recognition model…');
+      _scheduleUiRebuild();
+      await appFaceEmbedder.initialize();
+      if (!mounted) return;
+    }
 
     final preloadEither = await ref.read(faceRepositoryProvider).preloadGallery();
     if (!mounted) return;

@@ -31,6 +31,7 @@ class EmployeeCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         child: GlassPanel(
           borderRadius: 20,
+          blurSigma: 0,
           padding: EdgeInsets.all(compact ? 12 : 14),
           child: Column(
             mainAxisSize: MainAxisSize.min,

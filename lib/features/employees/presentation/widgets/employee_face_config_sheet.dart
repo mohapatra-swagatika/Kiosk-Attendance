@@ -35,7 +35,12 @@ Future<void> showEmployeeFaceConfigSheet({
                   Text(FaceConfigStrings.title, style: Theme.of(sheetContext).textTheme.headlineSmall),
                   const SizedBox(height: 4),
                   Text(
-                    FaceConfigStrings.subtitle(name: employee.name, id: employee.id),
+                    FaceConfigStrings.subtitle(
+                      name: employee.name,
+                      id: employee.employeeCode?.isNotEmpty == true
+                          ? employee.employeeCode!
+                          : employee.id,
+                    ),
                     style: Theme.of(sheetContext).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 16),

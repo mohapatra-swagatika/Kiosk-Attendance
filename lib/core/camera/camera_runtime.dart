@@ -56,11 +56,11 @@ class CameraRuntime {
 
   static Duration enrollmentPreviewDelay() {
     if (Platform.isAndroid) {
-      return const Duration(milliseconds: 180);
+      return const Duration(milliseconds: 80);
     }
     return isTabletLayout
-        ? const Duration(milliseconds: 280)
-        : const Duration(milliseconds: 400);
+        ? const Duration(milliseconds: 120)
+        : const Duration(milliseconds: 160);
   }
 
   /// Min gap between enrollment ML passes (tablet slightly slower).

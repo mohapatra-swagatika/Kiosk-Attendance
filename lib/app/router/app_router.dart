@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -20,6 +21,10 @@ import 'package:attendance_kiosk_app/features/registration/presentation/pages/re
 import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 import 'package:attendance_kiosk_app/features/shell/presentation/pages/kiosk_shell_page.dart';
 import 'package:attendance_kiosk_app/features/shell/presentation/pages/settings_page.dart';
+
+Page<void> _noTransitionPage(GoRouterState state, {required Widget child}) {
+  return NoTransitionPage<void>(key: state.pageKey, child: child);
+}
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   final refresh = ref.watch(routerRefreshProvider);
@@ -81,7 +86,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: RoutePaths.registration,
-        builder: (context, state) => const RegistrationPage(),
+        pageBuilder: (context, state) =>
+            _noTransitionPage(state, child: const RegistrationPage()),
       ),
       GoRoute(
         path: RoutePaths.login,
@@ -89,13 +95,17 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RoutePaths.kiosk,
-        builder: (context, state) => const KioskModePage(),
+        pageBuilder: (context, state) =>
+            _noTransitionPage(state, child: const KioskModePage()),
       ),
       GoRoute(
         path: RoutePaths.faceRegister,
-        builder: (context, state) {
+        pageBuilder: (context, state) {
           final id = state.pathParameters['id']!;
-          return FaceRegistrationPage(employeeId: id);
+          return _noTransitionPage(
+            state,
+            child: FaceRegistrationPage(employeeId: id),
+          );
         },
       ),
       ShellRoute(
@@ -103,38 +113,49 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: RoutePaths.home,
-            builder: (context, state) => const HomeDashboardPage(),
+            pageBuilder: (context, state) =>
+                _noTransitionPage(state, child: const HomeDashboardPage()),
           ),
           GoRoute(
             path: RoutePaths.employees,
-            builder: (context, state) => const EmployeesPage(),
+            pageBuilder: (context, state) =>
+                _noTransitionPage(state, child: const EmployeesPage()),
           ),
           GoRoute(
             path: RoutePaths.employeeDetail,
-            builder: (context, state) {
+            pageBuilder: (context, state) {
               final id = state.pathParameters['id']!;
               final extra = state.extra;
-              return EmployeeDetailsPage(
-                employeeId: id,
-                initialEmployee: extra is Employee ? extra : null,
+              return _noTransitionPage(
+                state,
+                child: EmployeeDetailsPage(
+                  employeeId: id,
+                  initialEmployee: extra is Employee ? extra : null,
+                ),
               );
             },
           ),
           GoRoute(
             path: RoutePaths.attendance,
-            builder: (context, state) => const AttendanceAdminPage(),
+            pageBuilder: (context, state) =>
+                _noTransitionPage(state, child: const AttendanceAdminPage()),
           ),
           GoRoute(
             path: RoutePaths.employeeHome,
-            builder: (context, state) => const EmployeeDashboardPage(),
+            pageBuilder: (context, state) =>
+                _noTransitionPage(state, child: const EmployeeDashboardPage()),
           ),
           GoRoute(
             path: RoutePaths.employeeAttendance,
-            builder: (context, state) => const EmployeeAttendanceRecordsPage(),
+            pageBuilder: (context, state) => _noTransitionPage(
+              state,
+              child: const EmployeeAttendanceRecordsPage(),
+            ),
           ),
           GoRoute(
             path: RoutePaths.settings,
-            builder: (context, state) => const SettingsPage(),
+            pageBuilder: (context, state) =>
+                _noTransitionPage(state, child: const SettingsPage()),
           ),
         ],
       ),

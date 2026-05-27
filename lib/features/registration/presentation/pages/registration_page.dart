@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter/foundation.dart';
 
 import 'package:attendance_kiosk_app/app/router/router_refresh.dart';
 import 'package:attendance_kiosk_app/app/router/route_paths.dart';
@@ -26,7 +27,7 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
   final _domain = TextEditingController();
   final _machine = TextEditingController();
   final _description = TextEditingController();
-  bool _canSubmit = false;
+  final _canSubmit = ValueNotifier<bool>(false);
   late final VoidCallback _onFieldsChanged;
 
   @override
@@ -37,9 +38,7 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
           _domain.text.trim().isNotEmpty &&
           _machine.text.trim().isNotEmpty &&
           _description.text.trim().isNotEmpty;
-      if (can != _canSubmit) {
-        setState(() => _canSubmit = can);
-      }
+      if (can != _canSubmit.value) _canSubmit.value = can;
     };
     _code.addListener(_onFieldsChanged);
     _domain.addListener(_onFieldsChanged);
@@ -58,6 +57,7 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
     _domain.dispose();
     _machine.dispose();
     _description.dispose();
+    _canSubmit.dispose();
     super.dispose();
   }
 
@@ -127,7 +127,8 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
   @override
   Widget build(BuildContext context) {
-    final formState = ref.watch(registrationFormProvider);
+    final isSubmitting =
+        ref.watch(registrationFormProvider.select((s) => s.isSubmitting));
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -163,8 +164,8 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
                 domain: _domain,
                 machine: _machine,
                 description: _description,
-                isSubmitting: formState.isSubmitting,
-                canSubmit: _canSubmit,
+                isSubmitting: isSubmitting,
+                canSubmitListenable: _canSubmit,
                 onSubmit: _submit,
                 maxWidth: maxFormWidth,
                 twoColumnFields: isTablet,
@@ -284,7 +285,7 @@ class _RegistrationFormCard extends StatelessWidget {
     required this.machine,
     required this.description,
     required this.isSubmitting,
-    required this.canSubmit,
+    required this.canSubmitListenable,
     required this.onSubmit,
     required this.maxWidth,
     required this.twoColumnFields,
@@ -297,10 +298,9 @@ class _RegistrationFormCard extends StatelessWidget {
   final TextEditingController machine;
   final TextEditingController description;
   final bool isSubmitting;
-  final bool canSubmit;
   final VoidCallback onSubmit;
+  final ValueListenable<bool> canSubmitListenable;
 
-  bool get _registerEnabled => canSubmit && !isSubmitting;
   final double maxWidth;
   final bool twoColumnFields;
   final int descriptionMaxLines;
@@ -369,10 +369,62 @@ class _RegistrationFormCard extends StatelessWidget {
 
     final fieldGap = twoColumnFields ? 16.0 : 12.0;
 
+    Widget submitButton(bool canSubmit) {
+      final registerEnabled = canSubmit && !isSubmitting;
+      if (twoColumnFields) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 28,
+                vertical: 18,
+              ),
+              minimumSize: const Size(200, 52),
+            ),
+            onPressed: registerEnabled ? onSubmit : null,
+            icon: isSubmitting
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.app_registration_rounded),
+            label: Text(
+              isSubmitting ? RegistrationStrings.submitting : RegistrationStrings.submit,
+            ),
+          ),
+        );
+      }
+      return FilledButton.icon(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 16,
+          ),
+          minimumSize: const Size(double.infinity, 52),
+        ),
+        onPressed: registerEnabled ? onSubmit : null,
+        icon: isSubmitting
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.app_registration_rounded),
+        label: Text(
+          isSubmitting ? RegistrationStrings.submitting : RegistrationStrings.submit,
+        ),
+      );
+    }
+
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: GlassPanel(
         padding: EdgeInsets.all(twoColumnFields ? 28 : 22),
+        // Avoid BackdropFilter blur here: on iOS first-launch + keyboard focus can
+        // stutter/hang when large blurred surfaces need re-rasterization.
+        blurSigma: 0,
         child: Form(
           key: formKey,
           child: Column(
@@ -411,55 +463,10 @@ class _RegistrationFormCard extends StatelessWidget {
               SizedBox(height: fieldGap),
               descriptionField(),
               SizedBox(height: twoColumnFields ? 28 : 22),
-              if (twoColumnFields)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 28,
-                        vertical: 18,
-                      ),
-                      minimumSize: const Size(200, 52),
-                    ),
-                    onPressed: _registerEnabled ? onSubmit : null,
-                    icon: isSubmitting
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.app_registration_rounded),
-                    label: Text(
-                      isSubmitting
-                          ? RegistrationStrings.submitting
-                          : RegistrationStrings.submit,
-                    ),
-                  ),
-                )
-              else
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 16,
-                    ),
-                    minimumSize: const Size(double.infinity, 52),
-                  ),
-                  onPressed: _registerEnabled ? onSubmit : null,
-                  icon: isSubmitting
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.app_registration_rounded),
-                  label: Text(
-                    isSubmitting
-                        ? RegistrationStrings.submitting
-                        : RegistrationStrings.submit,
-                  ),
-                ),
+              ValueListenableBuilder<bool>(
+                valueListenable: canSubmitListenable,
+                builder: (context, can, _) => submitButton(can),
+              ),
             ],
           ),
         ),
