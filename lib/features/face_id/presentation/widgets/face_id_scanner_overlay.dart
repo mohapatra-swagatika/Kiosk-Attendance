@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/features/face_id/presentation/widgets/face_id_progress_ring.dart';
 
+enum FaceIdArrowDirection { left, right, up, down }
+
 /// Premium Face ID overlay used by enrollment and recognition.
 ///
 /// Renders, in order: cinematic darken + radial vignette, circular "portal"
@@ -23,6 +25,7 @@ class FaceIdScannerOverlay extends StatelessWidget {
     this.isComplete = false,
     this.isLocked = false,
     this.faceDotOffset,
+    this.arrowDirection,
     this.accentColor,
     this.showHeader = true,
   });
@@ -37,6 +40,7 @@ class FaceIdScannerOverlay extends StatelessWidget {
   final bool isComplete;
   final bool isLocked;
   final Offset? faceDotOffset;
+  final FaceIdArrowDirection? arrowDirection;
   final Color? accentColor;
   final bool showHeader;
 
@@ -86,14 +90,24 @@ class FaceIdScannerOverlay extends StatelessWidget {
                     const SizedBox(height: 8),
                   const Spacer(),
                   Center(
-                    child: FaceIdProgressRing(
-                      progress: ringProgress,
-                      diameter: ringSize.toDouble(),
-                      isCapturing: isCapturing,
-                      isComplete: isComplete,
-                      isLocked: isLocked,
-                      faceDotOffset: faceDotOffset,
-                      ringColor: accent,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        FaceIdProgressRing(
+                          progress: ringProgress,
+                          diameter: ringSize.toDouble(),
+                          isCapturing: isCapturing,
+                          isComplete: isComplete,
+                          isLocked: isLocked,
+                          faceDotOffset: faceDotOffset,
+                          ringColor: accent,
+                        ),
+                        if (arrowDirection != null && !isComplete && !isLocked)
+                          _DirectionalArrow(
+                            direction: arrowDirection!,
+                            color: accent,
+                          ),
+                      ],
                     ),
                   ),
                   const Spacer(),
@@ -110,6 +124,65 @@ class FaceIdScannerOverlay extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DirectionalArrow extends StatefulWidget {
+  const _DirectionalArrow({required this.direction, required this.color});
+
+  final FaceIdArrowDirection direction;
+  final Color color;
+
+  @override
+  State<_DirectionalArrow> createState() => _DirectionalArrowState();
+}
+
+class _DirectionalArrowState extends State<_DirectionalArrow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final angle = switch (widget.direction) {
+      FaceIdArrowDirection.left => 3.141592653589793,
+      FaceIdArrowDirection.right => 0.0,
+      FaceIdArrowDirection.up => -1.5707963267948966,
+      FaceIdArrowDirection.down => 1.5707963267948966,
+    };
+
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (context, _) {
+        final t = _pulse.value;
+        final dy = (0.5 - t) * 10;
+        return Transform.translate(
+          offset: Offset(0, dy),
+          child: Transform.rotate(
+            angle: angle,
+            child: Icon(
+              Icons.arrow_forward_rounded,
+              size: 56,
+              color: widget.color.withValues(alpha: 0.88),
+            ),
+          ),
+        );
+      },
     );
   }
 }

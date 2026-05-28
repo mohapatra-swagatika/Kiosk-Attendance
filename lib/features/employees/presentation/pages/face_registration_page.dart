@@ -43,7 +43,7 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     with TickerProviderStateMixin, WidgetsBindingObserver, CameraScanLifecycle {
   CameraController? _camera;
   final _analyzer = MlKitFaceAnalyzer.enrollment();
-  final _session = FaceRegistrationSession();
+  final _session = FaceRegistrationSession(guided: true);
 
   String _status = FaceRegistrationStrings.preparingCamera;
   String? _detail;
@@ -553,6 +553,13 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
               isCapturing: _session.phase == FaceIdEnrollPhase.scanning,
               isComplete: _enrollmentComplete,
               faceDotOffset: _faceDotForOverlay(metrics),
+              arrowDirection: switch (_session.guidedStep) {
+                FaceIdGuidedStep.left => FaceIdArrowDirection.left,
+                FaceIdGuidedStep.right => FaceIdArrowDirection.right,
+                FaceIdGuidedStep.up => FaceIdArrowDirection.up,
+                FaceIdGuidedStep.down => FaceIdArrowDirection.down,
+                _ => null,
+              },
             ),
           if (_blocked)
             FaceIdScannerOverlay(

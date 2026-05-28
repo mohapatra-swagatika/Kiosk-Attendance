@@ -19,9 +19,7 @@ bool appMlBootstrapComplete = false;
 ///
 /// ML Kit is **not** warmed up here — a dummy `processImage` call can freeze iOS
 /// for 15–20s on the main thread. The first real camera frame primes the detector.
-Future<String?> bootstrap({
-  void Function(String status)? onStatus,
-}) async {
+Future<String?> bootstrap({void Function(String status)? onStatus}) async {
   WidgetsFlutterBinding.ensureInitialized();
   CameraSessionHelper.warmUpCameraList();
   onStatus?.call('Connecting services…');
@@ -67,8 +65,6 @@ Future<String?> bootstrap({
 /// Minimal error shell when bootstrap fails before [ProviderScope].
 Widget bootstrapErrorApp(String message) {
   return MaterialApp(
-    home: Scaffold(
-      body: AppErrorView(message: message),
-    ),
+    home: Scaffold(body: AppErrorView(message: message)),
   );
 }

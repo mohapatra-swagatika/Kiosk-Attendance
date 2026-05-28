@@ -102,14 +102,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? LoginStrings.kioskExited : LoginStrings.kioskExitFailed),
+        content: Text(
+          ok ? LoginStrings.kioskExited : LoginStrings.kioskExitFailed,
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final formState = ref.watch(loginFormProvider);
+    final isSubmitting = ref.watch(
+      loginFormProvider.select((s) => s.isSubmitting),
+    );
     final configAsync = ref.watch(kioskConfigProvider);
     final registeredDomain = KioskPairApiUrls.subdomainFromStored(
       configAsync.valueOrNull?.domain ?? '',
@@ -149,7 +153,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 domainLoading: configAsync.isLoading,
                 username: _user,
                 password: _pass,
-                isSubmitting: formState.isSubmitting,
+                isSubmitting: isSubmitting,
                 onSubmit: _login,
                 maxWidth: maxFormWidth,
                 onStartKioskMode: () => _login(thenGoKiosk: true),
@@ -315,6 +319,9 @@ class _LoginFormCardState extends State<_LoginFormCard> {
       constraints: BoxConstraints(maxWidth: widget.maxWidth),
       child: GlassPanel(
         padding: const EdgeInsets.all(26),
+        // Avoid BackdropFilter blur here: on iOS first-install + keyboard focus
+        // can stutter/hang when large blurred surfaces need re-rasterization.
+        blurSigma: 0,
         child: Form(
           key: widget.formKey,
           child: Column(
@@ -335,8 +342,12 @@ class _LoginFormCardState extends State<_LoginFormCard> {
               ),
               const SizedBox(height: 24),
               TextFormField(
-                key: ValueKey('login-domain-${widget.domain}-${widget.domainLoading}'),
-                initialValue: widget.domainLoading ? AppStrings.loadingEllipsis : widget.domain,
+                key: ValueKey(
+                  'login-domain-${widget.domain}-${widget.domainLoading}',
+                ),
+                initialValue: widget.domainLoading
+                    ? AppStrings.loadingEllipsis
+                    : widget.domain,
                 readOnly: true,
                 enabled: false,
                 decoration: const InputDecoration(
@@ -375,9 +386,12 @@ class _LoginFormCardState extends State<_LoginFormCard> {
                     tooltip: _obscurePassword
                         ? LoginStrings.showPassword
                         : LoginStrings.hidePassword,
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
                     icon: Icon(
-                      _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
                     ),
                   ),
                 ),
@@ -402,7 +416,11 @@ class _LoginFormCardState extends State<_LoginFormCard> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.login_rounded),
-                label: Text(widget.isSubmitting ? LoginStrings.submitting : LoginStrings.submit),
+                label: Text(
+                  widget.isSubmitting
+                      ? LoginStrings.submitting
+                      : LoginStrings.submit,
+                ),
               ),
               const SizedBox(height: 24),
               const Divider(height: 1),

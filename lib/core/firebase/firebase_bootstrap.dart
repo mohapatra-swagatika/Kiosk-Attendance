@@ -33,9 +33,16 @@ Future<void> initializeFirebaseCore() async {
 
   // Registers CCT / policy vendor bindings used by ML Kit + GoogleDataTransport.
   try {
-    await FirebaseInstallations.instance
-        .getId()
-        .timeout(const Duration(seconds: 5));
+    // Do not block app startup on this call. On some iOS devices, this can take
+    // seconds on first install and makes the Registration screen feel frozen.
+    //
+    // We still kick it off so ML Kit's GoogleDataTransport can bind later.
+    // Ignore failures — ML features will handle missing telemetry.
+    unawaited(
+      FirebaseInstallations.instance
+          .getId()
+          .timeout(const Duration(seconds: 5)),
+    );
     if (kDebugMode) {
       debugPrint(
         'Firebase Installations ready (${DefaultFirebaseOptions.currentPlatform.projectId})',

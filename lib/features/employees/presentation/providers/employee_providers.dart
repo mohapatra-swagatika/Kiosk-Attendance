@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:attendance_kiosk_app/core/api/mock_employee_roster.dart';
@@ -58,7 +60,9 @@ final employeesListProvider = FutureProvider<List<Employee>>((ref) async {
     final seed = ref.read(seedEmployeesIfEmptyUseCaseProvider);
     await seed(SeedEmployeesParams(ref.read(defaultDummyEmployeesProvider)));
   }
-  await ref.read(faceRepositoryProvider).reconcileFaceRegistrationFlags();
+  // Reconcile face flags in the background to keep first render smooth.
+  // This may update face badges a moment later on very large rosters.
+  unawaited(ref.read(faceRepositoryProvider).reconcileFaceRegistrationFlags());
   final get = ref.read(getEmployeesUseCaseProvider);
   final result = await get(const NoParams());
   return result.fold((l) => throw StateError(l.message), (r) => r);

@@ -15,6 +15,15 @@ enum FaceIdEnrollPhase {
   finished,
 }
 
+enum FaceIdGuidedStep {
+  straight,
+  left,
+  right,
+  up,
+  down,
+  done,
+}
+
 /// Smooth, automatic Face ID enrollment.
 ///
 /// Design notes:
@@ -24,7 +33,13 @@ enum FaceIdEnrollPhase {
 ///   * Targets ~8 distinct samples across a wide enough yaw range.
 ///   * Stops as soon as the ring is full; never traps the user in a phase.
 class FaceRegistrationSession {
-  FaceRegistrationSession();
+  FaceRegistrationSession({this.guided = true});
+
+  /// When true, uses an explicit Face ID-like step flow:
+  /// 1) Capture a straight sample
+  /// 2) Guide left, right, up, down
+  /// While still using the same capture + payload logic.
+  final bool guided;
 
   /// Frames the face must be centered + at a sane distance before scanning.
   static const int positioningFramesRequired = 4;
@@ -72,6 +87,7 @@ class FaceRegistrationSession {
   bool _sawEyesClosed = false;
 
   final List<_CapturedSample> _samples = [];
+  FaceIdGuidedStep _guidedStep = FaceIdGuidedStep.straight;
   bool _locked = false;
   bool _captureInFlight = false;
   bool _completed = false;
@@ -81,12 +97,20 @@ class FaceRegistrationSession {
   FaceIdLiveMetrics _liveMetrics = FaceIdLiveMetrics.empty();
 
   FaceIdEnrollPhase get phase => _phase;
+  FaceIdGuidedStep get guidedStep => guided ? _guidedStep : FaceIdGuidedStep.done;
   bool get isLocked => _locked;
   bool get isPositioningPhase => _phase == FaceIdEnrollPhase.positioning;
   FaceIdLiveMetrics get liveMetrics => _liveMetrics;
   String? get statusMessage => _statusMessage;
   String? get detailMessage => _detailMessage;
   double get faceIdRingProgress => _smoothedRing;
+
+  bool get hasStraightSample {
+    for (final s in _samples) {
+      if (s.yaw.abs() <= 7 && s.pitch.abs() <= 7) return true;
+    }
+    return false;
+  }
 
   void tickAnimation() {
     if (_locked) return;
@@ -99,7 +123,21 @@ class FaceRegistrationSession {
       case FaceIdEnrollPhase.positioning:
         return FaceRegistrationStrings.faceIdPositionFace;
       case FaceIdEnrollPhase.scanning:
-        return FaceRegistrationStrings.faceIdCompleteCircle;
+        if (!guided) return FaceRegistrationStrings.faceIdCompleteCircle;
+        switch (_guidedStep) {
+          case FaceIdGuidedStep.straight:
+            return 'Look straight';
+          case FaceIdGuidedStep.left:
+            return FaceRegistrationStrings.faceIdTurnLeft;
+          case FaceIdGuidedStep.right:
+            return FaceRegistrationStrings.faceIdTurnRight;
+          case FaceIdGuidedStep.up:
+            return FaceRegistrationStrings.faceIdTiltUp;
+          case FaceIdGuidedStep.down:
+            return FaceRegistrationStrings.faceIdTiltDown;
+          case FaceIdGuidedStep.done:
+            return FaceRegistrationStrings.faceIdAlmostDone;
+        }
       case FaceIdEnrollPhase.finished:
         return FaceRegistrationStrings.faceIdComplete;
     }
@@ -184,7 +222,12 @@ class FaceRegistrationSession {
 
     _samples.add(_CapturedSample(yaw: yaw, pitch: pitch, embedding: embedding));
     _statusMessage = primaryGuidance;
-    _detailMessage = _maybeAdvanceFromCircle();
+    if (guided && _phase == FaceIdEnrollPhase.scanning) {
+      _advanceGuidedStepAfterCapture(yaw: yaw, pitch: pitch);
+      _detailMessage = _guidedDetailHint();
+    } else {
+      _detailMessage = _maybeAdvanceFromCircle();
+    }
   }
 
   void _handleNoFace(FaceFrameAnalysis analysis) {
@@ -289,7 +332,22 @@ class FaceRegistrationSession {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastCaptureAttemptMs < _minMsBetweenCaptureAttempts) {
       _statusMessage = primaryGuidance;
-      _detailMessage = _scanningDetailHint();
+      _detailMessage = guided ? _guidedDetailHint() : _scanningDetailHint();
+      return false;
+    }
+
+    if (guided) {
+      if (_guidedStep == FaceIdGuidedStep.done) {
+        _completeEnrollment();
+        return false;
+      }
+      if (_shouldAttemptGuidedCapture(yaw: yaw, pitch: pitch)) {
+        _statusMessage = primaryGuidance;
+        _detailMessage = FaceRegistrationStrings.faceIdCapturingSample;
+        return true;
+      }
+      _statusMessage = primaryGuidance;
+      _detailMessage = _guidedDetailHint();
       return false;
     }
 
@@ -302,6 +360,71 @@ class FaceRegistrationSession {
     _statusMessage = primaryGuidance;
     _detailMessage = _scanningDetailHint();
     return false;
+  }
+
+  bool _isWithinGuidedTarget({required double yaw, required double pitch}) {
+    switch (_guidedStep) {
+      case FaceIdGuidedStep.straight:
+        return yaw.abs() <= 7 && pitch.abs() <= 7;
+      case FaceIdGuidedStep.left:
+        return yaw <= -12;
+      case FaceIdGuidedStep.right:
+        return yaw >= 12;
+      case FaceIdGuidedStep.up:
+        // ML Kit headEulerAngleX is positive when the face tilts UP on iOS.
+        // (Empirically: users reported "Look Up" never triggers unless sign is flipped.)
+        return pitch >= 10;
+      case FaceIdGuidedStep.down:
+        return pitch <= -10;
+      case FaceIdGuidedStep.done:
+        return true;
+    }
+  }
+
+  bool _shouldAttemptGuidedCapture({required double yaw, required double pitch}) {
+    // Require stability and a step-specific angle target before capturing.
+    if (_stableFrames < _stableFramesRequired) return false;
+    if (!_isWithinGuidedTarget(yaw: yaw, pitch: pitch)) return false;
+
+    // Avoid recapturing the same step with near-identical angles.
+    final last = _lastCapturedYaw;
+    if (last != null && (yaw - last).abs() < 2.0 && _guidedStep != FaceIdGuidedStep.up && _guidedStep != FaceIdGuidedStep.down) {
+      return false;
+    }
+    return true;
+  }
+
+  void _advanceGuidedStepAfterCapture({required double yaw, required double pitch}) {
+    if (!_isWithinGuidedTarget(yaw: yaw, pitch: pitch)) return;
+
+    switch (_guidedStep) {
+      case FaceIdGuidedStep.straight:
+        _guidedStep = FaceIdGuidedStep.left;
+      case FaceIdGuidedStep.left:
+        _guidedStep = FaceIdGuidedStep.right;
+      case FaceIdGuidedStep.right:
+        _guidedStep = FaceIdGuidedStep.up;
+      case FaceIdGuidedStep.up:
+        _guidedStep = FaceIdGuidedStep.down;
+      case FaceIdGuidedStep.down:
+        _guidedStep = FaceIdGuidedStep.done;
+      case FaceIdGuidedStep.done:
+        break;
+    }
+  }
+
+  String _guidedDetailHint() {
+    switch (_guidedStep) {
+      case FaceIdGuidedStep.straight:
+        return FaceRegistrationStrings.faceIdPositionFace;
+      case FaceIdGuidedStep.left:
+      case FaceIdGuidedStep.right:
+      case FaceIdGuidedStep.up:
+      case FaceIdGuidedStep.down:
+        return FaceRegistrationStrings.faceIdSlowScanHint;
+      case FaceIdGuidedStep.done:
+        return FaceRegistrationStrings.faceIdAlmostDone;
+    }
   }
 
   bool _shouldAttemptCapture(double yaw) {
@@ -336,6 +459,18 @@ class FaceRegistrationSession {
         return (_positioningFrames / positioningFramesRequired * 0.10)
             .clamp(0.0, 0.10);
       case FaceIdEnrollPhase.scanning:
+        if (guided) {
+          final stepProgress = switch (_guidedStep) {
+            FaceIdGuidedStep.straight => 0.0,
+            FaceIdGuidedStep.left => 0.20,
+            FaceIdGuidedStep.right => 0.40,
+            FaceIdGuidedStep.up => 0.60,
+            FaceIdGuidedStep.down => 0.80,
+            FaceIdGuidedStep.done => 1.0,
+          };
+          return (0.10 + stepProgress * 0.88).clamp(0.10, 0.99);
+        }
+
         final sampleRatio = (_samples.length / _targetSamples).clamp(0.0, 1.0);
         final spread = (_maxYawSeen - _minYawSeen).clamp(0.0, 40.0) / 40.0;
         final stabilityBonus =

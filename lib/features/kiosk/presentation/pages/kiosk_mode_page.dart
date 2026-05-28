@@ -59,11 +59,11 @@ class _KioskModePageState extends ConsumerState<KioskModePage> {
     return switch (_view) {
       KioskModeView.faceScan => const KioskCameraPanel(),
       KioskModeView.pinAttendance => KioskPinAttendancePanel(
-          onOpenLogin: () => setState(() => _view = KioskModeView.pinLogin),
-        ),
+        onOpenLogin: () => setState(() => _view = KioskModeView.pinLogin),
+      ),
       KioskModeView.pinLogin => KioskPinLoginPanel(
-          onCancel: () => setState(() => _view = defaultView),
-        ),
+        onCancel: () => setState(() => _view = defaultView),
+      ),
     };
   }
 
@@ -73,7 +73,8 @@ class _KioskModePageState extends ConsumerState<KioskModePage> {
     final mode = configAsync.valueOrNull?.attendanceMode ?? AttendanceMode.face;
     final defaultView = _defaultView(mode);
     if (_view != KioskModeView.pinLogin &&
-        ((mode == AttendanceMode.face && _view == KioskModeView.pinAttendance) ||
+        ((mode == AttendanceMode.face &&
+                _view == KioskModeView.pinAttendance) ||
             (mode == AttendanceMode.pin && _view == KioskModeView.faceScan))) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _view = defaultView);
@@ -111,14 +112,17 @@ class _KioskModePageState extends ConsumerState<KioskModePage> {
                     child: Padding(
                       padding: const EdgeInsets.all(8),
                       child: Material(
-                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surface.withValues(alpha: 0.92),
                         elevation: 2,
                         shadowColor: Colors.black26,
                         borderRadius: BorderRadius.circular(12),
                         child: IconButton(
                           tooltip: 'Menu',
                           icon: const Icon(Icons.menu_rounded),
-                          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                          onPressed: () =>
+                              _scaffoldKey.currentState?.openDrawer(),
                         ),
                       ),
                     ),
