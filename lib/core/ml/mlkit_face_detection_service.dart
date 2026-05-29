@@ -18,8 +18,7 @@ import 'package:attendance_kiosk_app/core/ml/mlkit_face_detector_factory.dart';
 /// as the returned bounding box, we expose the rotated (W↔H swapped) dims on
 /// Android only. iOS is untouched.
 ({int width, int height}) mlKitReportedDims(LiveCameraFrame frame) {
-  final swap =
-      Platform.isAndroid &&
+  final swap = Platform.isAndroid &&
       frame.format == LiveCameraImageFormat.nv21 &&
       (frame.rotationDegrees == 90 || frame.rotationDegrees == 270);
   if (swap) {
@@ -68,17 +67,16 @@ class MlKitEnrollmentFaceDetector {
   Future<void> warmUp() async {
     if (_modelPrimed || _closed) return;
     if (kDebugMode) {
-      debugPrint('[MLKit] Enrollment detector waiting for still-frame prime');
+      debugPrint(
+        '[MLKit] Enrollment detector waiting for still-frame prime',
+      );
     }
   }
 
   Future<FaceFrameAnalysis> detectLiveFrame(LiveCameraFrame frame) {
     return FaceMlDetectSerial.runEnrollment(() async {
       if (_closed) {
-        return const FaceFrameAnalysis(
-          faceCount: 0,
-          message: 'Detector closed',
-        );
+        return const FaceFrameAnalysis(faceCount: 0, message: 'Detector closed');
       }
 
       final input = InputImage.fromBytes(
@@ -87,7 +85,7 @@ class MlKitEnrollmentFaceDetector {
           size: Size(frame.width.toDouble(), frame.height.toDouble()),
           rotation:
               InputImageRotationValue.fromRawValue(frame.rotationDegrees) ??
-              InputImageRotation.rotation0deg,
+                  InputImageRotation.rotation0deg,
           format: frame.format == LiveCameraImageFormat.nv21
               ? InputImageFormat.nv21
               : InputImageFormat.bgra8888,

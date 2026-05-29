@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:attendance_kiosk_app/core/config/attendance_mode.dart';
 import 'package:attendance_kiosk_app/core/responsive/responsive_builder.dart';
-import 'package:attendance_kiosk_app/features/kiosk/presentation/kiosk_face_stack_warmup.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_camera_panel.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_mode_view.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_pin_attendance_panel.dart';
@@ -30,7 +29,6 @@ class _KioskModePageState extends ConsumerState<KioskModePage> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    KioskFaceStackWarmup.instance.schedule();
   }
 
   @override

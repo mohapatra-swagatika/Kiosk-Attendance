@@ -7,10 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:attendance_kiosk_app/core/face_data_sync/face_data_sync_providers.dart';
 import 'package:attendance_kiosk_app/core/kiosk_events/kiosk_events_providers.dart';
 import 'package:attendance_kiosk_app/core/network/network_connectivity.dart';
-import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
-import 'package:attendance_kiosk_app/app/app_launch_gate.dart';
-import 'package:attendance_kiosk_app/app/app_startup_coordinator.dart';
 import 'package:attendance_kiosk_app/core/usecases/usecase.dart';
+import 'package:attendance_kiosk_app/features/registration/presentation/providers/registration_providers.dart';
 
 /// Listens for connectivity changes and flushes offline queues (events + face data).
 class KioskEventsSyncListener extends ConsumerStatefulWidget {
@@ -33,19 +31,12 @@ class _KioskEventsSyncListenerState extends ConsumerState<KioskEventsSyncListene
     // Defer background syncing so first user interaction (text input focus,
     // keyboard open, route transition) is never competing with I/O work.
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => Future<void>.delayed(const Duration(milliseconds: 2500), _bootstrap),
+      (_) => Future<void>.delayed(const Duration(milliseconds: 1200), _bootstrap),
     );
   }
 
   Future<void> _bootstrap() async {
     if (!mounted) return;
-    final storageReady = ref.read(appStartupCoordinatorProvider).storageReady;
-    if (!storageReady) {
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      if (!mounted) return;
-      return _bootstrap();
-    }
-
     final connectivity = ref.read(networkConnectivityProvider);
     final online = await connectivity.hasConnection();
     _wasOffline = !online;
@@ -62,8 +53,6 @@ class _KioskEventsSyncListenerState extends ConsumerState<KioskEventsSyncListene
   }
 
   Future<void> _flushQueueIfPaired() async {
-    if (!AppLaunchGate.isStorageReady) return;
-
     // On first install, the app sits on Registration. Syncing is unnecessary
     // there and can cause UI jank while the keyboard/focus animation starts.
     final hasEither =

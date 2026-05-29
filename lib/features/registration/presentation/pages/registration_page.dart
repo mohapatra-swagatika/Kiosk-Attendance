@@ -3,8 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/foundation.dart';
 
-import 'package:attendance_kiosk_app/app/app_launch_gate.dart';
-import 'package:attendance_kiosk_app/app/app_startup_coordinator.dart';
 import 'package:attendance_kiosk_app/app/router/router_refresh.dart';
 import 'package:attendance_kiosk_app/app/router/route_paths.dart';
 import 'package:attendance_kiosk_app/core/api/kiosk_pair_api_urls.dart';
@@ -36,7 +34,8 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
   void initState() {
     super.initState();
     _onFieldsChanged = () {
-      final can = _code.text.trim().isNotEmpty &&
+      final can =
+          _code.text.trim().isNotEmpty &&
           _domain.text.trim().isNotEmpty &&
           _machine.text.trim().isNotEmpty &&
           _description.text.trim().isNotEmpty;
@@ -47,14 +46,6 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
     _machine.addListener(_onFieldsChanged);
     _description.addListener(_onFieldsChanged);
     _onFieldsChanged();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _redirectIfAlreadyRegistered());
-  }
-
-  void _redirectIfAlreadyRegistered() {
-    if (!mounted) return;
-    if (AppLaunchGate.isCached && AppLaunchGate.cached.hasConfig) {
-      context.go(RoutePaths.kiosk);
-    }
   }
 
   @override
@@ -73,7 +64,6 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    if (!ref.read(appStartupCoordinatorProvider).storageReady) return;
 
     final config = KioskConfig(
       code: _code.text.trim(),
@@ -88,7 +78,9 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
     if (!ok) {
       final msg = ref.read(registrationFormProvider).errorMessage;
       if (msg != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
       }
       return;
     }
@@ -113,9 +105,9 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
               SelectableText(
                 adminPin,
                 style: Theme.of(ctx).textTheme.headlineMedium?.copyWith(
-                      letterSpacing: 8,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  letterSpacing: 8,
+                  fontWeight: FontWeight.bold,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -132,29 +124,18 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
     if (!mounted) return;
     ref.invalidate(kioskConfigProvider);
-    await ref.read(routerRefreshProvider).reloadAndNotify();
-    if (!mounted) return;
+    ref.read(routerRefreshProvider).notify();
     context.go(RoutePaths.kiosk);
   }
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(
-      appStartupCoordinatorProvider.select((s) => s.storageReady),
-      (prev, ready) {
-        if (ready == true) {
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _redirectIfAlreadyRegistered(),
-          );
-        }
-      },
+    final isSubmitting = ref.watch(
+      registrationFormProvider.select((s) => s.isSubmitting),
     );
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      // Manual scroll padding below — avoids relayout of the whole form on each
-      // keyboard inset frame (resizeToAvoidBottomInset shrinks body constraints).
-      resizeToAvoidBottomInset: false,
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -181,26 +162,28 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
                 AppBreakpointSize.expanded => 48.0,
               };
 
+              final form = _RegistrationFormCard(
+                formKey: _formKey,
+                code: _code,
+                domain: _domain,
+                machine: _machine,
+                description: _description,
+                isSubmitting: isSubmitting,
+                canSubmitListenable: _canSubmit,
+                onSubmit: _submit,
+                maxWidth: maxFormWidth,
+                twoColumnFields: isTablet,
+                descriptionMaxLines: isTablet ? 4 : 3,
+              );
+
               // Same centered form layout on mobile and tablet (hero panel disabled).
               return Center(
-                child: RepaintBoundary(
-                  child: _RegistrationFormScroll(
-                    horizontalPadding: horizontalPadding,
-                    verticalPadding: isTablet ? 24 : 16,
-                    child: _RegistrationFormCard(
-                      key: const ValueKey('registration-form-card'),
-                      formKey: _formKey,
-                      code: _code,
-                      domain: _domain,
-                      machine: _machine,
-                      description: _description,
-                      canSubmitListenable: _canSubmit,
-                      onSubmit: _submit,
-                      maxWidth: maxFormWidth,
-                      twoColumnFields: isTablet,
-                      descriptionMaxLines: isTablet ? 4 : 3,
-                    ),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: horizontalPadding,
+                    vertical: isTablet ? 24 : 16,
                   ),
+                  child: form,
                 ),
               );
 
@@ -298,14 +281,14 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 //   }
 // }
 
-class _RegistrationFormCard extends StatefulWidget {
+class _RegistrationFormCard extends StatelessWidget {
   const _RegistrationFormCard({
-    super.key,
     required this.formKey,
     required this.code,
     required this.domain,
     required this.machine,
     required this.description,
+    required this.isSubmitting,
     required this.canSubmitListenable,
     required this.onSubmit,
     required this.maxWidth,
@@ -318,140 +301,20 @@ class _RegistrationFormCard extends StatefulWidget {
   final TextEditingController domain;
   final TextEditingController machine;
   final TextEditingController description;
-  final ValueListenable<bool> canSubmitListenable;
+  final bool isSubmitting;
   final VoidCallback onSubmit;
+  final ValueListenable<bool> canSubmitListenable;
+
   final double maxWidth;
   final bool twoColumnFields;
   final int descriptionMaxLines;
 
   @override
-  State<_RegistrationFormCard> createState() => _RegistrationFormCardState();
-}
-
-class _RegistrationFormCardState extends State<_RegistrationFormCard> {
-  @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final fieldGap = widget.twoColumnFields ? 16.0 : 12.0;
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: widget.maxWidth),
-      child: GlassPanel(
-        padding: EdgeInsets.all(widget.twoColumnFields ? 28 : 22),
-        // Avoid BackdropFilter blur here: on iOS first-launch + keyboard focus can
-        // stutter/hang when large blurred surfaces need re-rasterization.
-        blurSigma: 0,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const _RegistrationStorageBanner(),
-            Text(
-              RegistrationStrings.heroTitle,
-              style: textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              RegistrationStrings.heroBody,
-              style: textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            SizedBox(height: widget.twoColumnFields ? 28 : 20),
-            RepaintBoundary(
-              child: Form(
-                key: widget.formKey,
-                child: _RegistrationFormFields(
-                  code: widget.code,
-                  domain: widget.domain,
-                  machine: widget.machine,
-                  description: widget.description,
-                  onSubmit: widget.onSubmit,
-                  twoColumnFields: widget.twoColumnFields,
-                  descriptionMaxLines: widget.descriptionMaxLines,
-                  fieldGap: fieldGap,
-                ),
-              ),
-            ),
-            SizedBox(height: widget.twoColumnFields ? 28 : 22),
-            _RegistrationSubmitButton(
-              canSubmitListenable: widget.canSubmitListenable,
-              onSubmit: widget.onSubmit,
-              twoColumnFields: widget.twoColumnFields,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Text inputs only — kept separate so keyboard inset / submit state do not
-/// rebuild fields while they are focused.
-class _RegistrationFormFields extends StatelessWidget {
-  const _RegistrationFormFields({
-    required this.code,
-    required this.domain,
-    required this.machine,
-    required this.description,
-    required this.onSubmit,
-    required this.twoColumnFields,
-    required this.descriptionMaxLines,
-    required this.fieldGap,
-  });
-
-  final TextEditingController code;
-  final TextEditingController domain;
-  final TextEditingController machine;
-  final TextEditingController description;
-  final VoidCallback onSubmit;
-  final bool twoColumnFields;
-  final int descriptionMaxLines;
-  final double fieldGap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (twoColumnFields)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _RegistrationCodeField(controller: code)),
-              SizedBox(width: fieldGap),
-              Expanded(child: _RegistrationDomainField(controller: domain)),
-            ],
-          )
-        else ...[
-          _RegistrationCodeField(controller: code),
-          SizedBox(height: fieldGap),
-          _RegistrationDomainField(controller: domain),
-        ],
-        SizedBox(height: fieldGap),
-        _RegistrationMachineField(controller: machine),
-        SizedBox(height: fieldGap),
-        _RegistrationDescriptionField(
-          controller: description,
-          onSubmit: onSubmit,
-          maxLines: descriptionMaxLines,
-          minLines: twoColumnFields ? 3 : 2,
-        ),
-      ],
-    );
-  }
-}
-
-class _RegistrationCodeField extends StatelessWidget {
-  const _RegistrationCodeField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
+    Widget codeField() => TextFormField(
+      controller: code,
       textInputAction: TextInputAction.next,
       decoration: const InputDecoration(
         labelText: RegistrationStrings.codeLabel,
@@ -462,18 +325,9 @@ class _RegistrationCodeField extends StatelessWidget {
           ? RegistrationStrings.codeRequired
           : null,
     );
-  }
-}
 
-class _RegistrationDomainField extends StatelessWidget {
-  const _RegistrationDomainField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
+    Widget domainField() => TextFormField(
+      controller: domain,
       textInputAction: TextInputAction.next,
       keyboardType: TextInputType.text,
       decoration: const InputDecoration(
@@ -486,18 +340,9 @@ class _RegistrationDomainField extends StatelessWidget {
           ? RegistrationStrings.domainRequired
           : null,
     );
-  }
-}
 
-class _RegistrationMachineField extends StatelessWidget {
-  const _RegistrationMachineField({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
+    Widget machineField() => TextFormField(
+      controller: machine,
       textInputAction: TextInputAction.next,
       decoration: const InputDecoration(
         labelText: RegistrationStrings.machineLabel,
@@ -508,30 +353,13 @@ class _RegistrationMachineField extends StatelessWidget {
           ? RegistrationStrings.machineRequired
           : null,
     );
-  }
-}
 
-class _RegistrationDescriptionField extends StatelessWidget {
-  const _RegistrationDescriptionField({
-    required this.controller,
-    required this.onSubmit,
-    required this.maxLines,
-    required this.minLines,
-  });
-
-  final TextEditingController controller;
-  final VoidCallback onSubmit;
-  final int maxLines;
-  final int minLines;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextFormField(
-      controller: controller,
+    Widget descriptionField() => TextFormField(
+      controller: description,
       textInputAction: TextInputAction.done,
       onFieldSubmitted: (_) => onSubmit(),
-      maxLines: maxLines,
-      minLines: minLines,
+      maxLines: descriptionMaxLines,
+      minLines: twoColumnFields ? 3 : 2,
       decoration: const InputDecoration(
         labelText: RegistrationStrings.descriptionLabel,
         hintText: RegistrationStrings.descriptionHint,
@@ -542,128 +370,109 @@ class _RegistrationDescriptionField extends StatelessWidget {
           ? RegistrationStrings.descriptionRequired
           : null,
     );
-  }
-}
 
-/// Applies keyboard bottom inset only here so opening the keyboard does not
-/// rebuild the registration form fields.
-class _RegistrationFormScroll extends StatelessWidget {
-  const _RegistrationFormScroll({
-    required this.horizontalPadding,
-    required this.verticalPadding,
-    required this.child,
-  });
-
-  final double horizontalPadding;
-  final double verticalPadding;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final keyboardBottom = MediaQuery.viewInsetsOf(context).bottom;
-    return SingleChildScrollView(
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: EdgeInsets.fromLTRB(
-        horizontalPadding,
-        verticalPadding,
-        horizontalPadding,
-        verticalPadding + keyboardBottom,
-      ),
-      child: child,
-    );
-  }
-}
-
-/// Isolated from text fields so storage init does not rebuild inputs mid-focus.
-class _RegistrationStorageBanner extends ConsumerWidget {
-  const _RegistrationStorageBanner();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final storageReady = ref.watch(
-      appStartupCoordinatorProvider.select((s) => s.storageReady),
-    );
-    if (storageReady) return const SizedBox.shrink();
-    return const Padding(
-      padding: EdgeInsets.only(bottom: 16),
-      child: LinearProgressIndicator(minHeight: 3),
-    );
-  }
-}
-
-class _RegistrationSubmitButton extends ConsumerWidget {
-  const _RegistrationSubmitButton({
-    required this.canSubmitListenable,
-    required this.onSubmit,
-    required this.twoColumnFields,
-  });
-
-  final ValueListenable<bool> canSubmitListenable;
-  final VoidCallback onSubmit;
-  final bool twoColumnFields;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final storageReady = ref.watch(
-      appStartupCoordinatorProvider.select((s) => s.storageReady),
-    );
-    final isSubmitting = ref.watch(
-      registrationFormProvider.select((s) => s.isSubmitting),
-    );
+    final fieldGap = twoColumnFields ? 16.0 : 12.0;
 
     Widget submitButton(bool canSubmit) {
-      final registerEnabled = canSubmit && !isSubmitting && storageReady;
-      final label = !storageReady
-          ? RegistrationStrings.preparingStorage
-          : isSubmitting
-              ? RegistrationStrings.submitting
-              : RegistrationStrings.submit;
+      final registerEnabled = canSubmit && !isSubmitting;
       if (twoColumnFields) {
         return Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
             style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 28,
-                vertical: 18,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
               minimumSize: const Size(200, 52),
             ),
             onPressed: registerEnabled ? onSubmit : null,
-            icon: isSubmitting || !storageReady
+            icon: isSubmitting
                 ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.app_registration_rounded),
-            label: Text(label),
+            label: Text(
+              isSubmitting
+                  ? RegistrationStrings.submitting
+                  : RegistrationStrings.submit,
+            ),
           ),
         );
       }
       return FilledButton.icon(
         style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 16,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           minimumSize: const Size(double.infinity, 52),
         ),
         onPressed: registerEnabled ? onSubmit : null,
-        icon: isSubmitting || !storageReady
+        icon: isSubmitting
             ? const SizedBox(
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.app_registration_rounded),
-        label: Text(label),
+        label: Text(
+          isSubmitting
+              ? RegistrationStrings.submitting
+              : RegistrationStrings.submit,
+        ),
       );
     }
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: canSubmitListenable,
-      builder: (context, can, _) => submitButton(can),
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth),
+      child: GlassPanel(
+        padding: EdgeInsets.all(twoColumnFields ? 28 : 22),
+        // Avoid BackdropFilter blur here: on iOS first-launch + keyboard focus can
+        // stutter/hang when large blurred surfaces need re-rasterization.
+        blurSigma: 0,
+        child: Form(
+          key: formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                RegistrationStrings.heroTitle,
+                style: textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                RegistrationStrings.heroBody,
+                style: textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              SizedBox(height: twoColumnFields ? 28 : 20),
+              if (twoColumnFields)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: codeField()),
+                    SizedBox(width: fieldGap),
+                    Expanded(child: domainField()),
+                  ],
+                )
+              else ...[
+                codeField(),
+                SizedBox(height: fieldGap),
+                domainField(),
+              ],
+              SizedBox(height: fieldGap),
+              machineField(),
+              SizedBox(height: fieldGap),
+              descriptionField(),
+              SizedBox(height: twoColumnFields ? 28 : 22),
+              ValueListenableBuilder<bool>(
+                valueListenable: canSubmitListenable,
+                builder: (context, can, _) => submitButton(can),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

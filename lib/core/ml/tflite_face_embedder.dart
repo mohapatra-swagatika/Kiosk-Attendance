@@ -7,13 +7,9 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
-import 'package:attendance_kiosk_app/core/ml/face_align_geometry.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
-import 'package:attendance_kiosk_app/core/ml/face_embed_preprocess.dart';
 import 'package:attendance_kiosk_app/core/ml/face_image_pipeline.dart';
 import 'package:attendance_kiosk_app/core/ml/face_match_debug_log.dart';
-import 'package:attendance_kiosk_app/core/ml/face_ml_serial.dart';
-import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 
 /// Result of a MobileFaceNet capture: embedding plus the aligned crop used.
 class FaceEmbeddingCapture {
@@ -38,7 +34,6 @@ class TfliteFaceEmbedder {
   IsolateInterpreter? _isolateInterpreter;
   bool _initialized = false;
   bool _loadAttempted = false;
-  bool _imagePipelineWarmed = false;
   int _inputSize = 112;
   int _outputDim = 192;
   String? _loadError;
@@ -106,53 +101,6 @@ class TfliteFaceEmbedder {
     }
   }
 
-  /// JITs NV21/BGRA → align → normalize on a worker isolate (not the UI thread).
-  Future<void> warmUpImagePipeline() async {
-    if (!isReady || _imagePipelineWarmed) return;
-    await preprocessEmbedInput(
-      FaceEmbedPreprocessInput.synthetic(outputSize: _inputSize),
-    );
-    _imagePipelineWarmed = true;
-  }
-
-  /// Runs one dummy inference so the first live unlock does not stall the UI.
-  Future<void> warmUpInference() async {
-    if (!isReady) return;
-    await warmUpImagePipeline();
-
-    await FaceMlEmbedSerial.runKiosk(() async {
-      final input = List.generate(
-        1,
-        (_) => List.generate(
-          _inputSize,
-          (_) => List.generate(_inputSize, (_) => List.filled(3, 0.0)),
-        ),
-      );
-      final output = List.generate(1, (_) => List.filled(_outputDim, 0.0));
-
-      final iso = _isolateInterpreter;
-      try {
-        if (iso != null) {
-          while (_inferLock != null) {
-            await _inferLock!.future;
-          }
-          final lock = Completer<void>();
-          _inferLock = lock;
-          try {
-            await iso.run(input, output);
-          } finally {
-            _inferLock = null;
-            lock.complete();
-          }
-        } else {
-          _interpreter!.run(input, output);
-        }
-      } catch (e) {
-        FaceMatchDebugLog.log('[FaceEmbedder] warm-up inference: $e');
-      }
-    });
-  }
-
   /// Generates a 192-dim L2-normalized embedding from a live camera frame + ML Kit face.
   ///
   /// Returns both the embedding and the aligned crop so callers can run
@@ -181,39 +129,19 @@ class TfliteFaceEmbedder {
   }) async {
     if (!isReady) return null;
 
-    final geometry = FaceAlignGeometry.fromFace(face);
-    if (geometry == null) return null;
-
-    final dims = mlKitReportedDims(frame);
-    final flat = await preprocessEmbedInput(
-      FaceEmbedPreprocessInput(
-        bytes: frame.bytes,
-        width: frame.width,
-        height: frame.height,
-        rotationDegrees: frame.rotationDegrees,
-        bytesPerRow: frame.bytesPerRow,
-        format: frame.format,
-        sensorOrientation: description.sensorOrientation,
-        lensDirection: description.lensDirection,
-        mlKitWidth: dims.width,
-        mlKitHeight: dims.height,
-        geometry: geometry,
-        outputSize: _inputSize,
-      ),
+    final crop = FaceImagePipeline.alignedFaceCropFromLiveFrame(
+      frame: frame,
+      description: description,
+      face: face,
+      outputSize: _inputSize,
     );
-    if (flat == null) return null;
-
-    return _embedFromFlatInput(flat);
+    return await _embedFromCrop(crop);
   }
 
   Future<FaceEmbeddingCapture?> _embedFromCrop(img.Image? crop) async {
     if (crop == null) return null;
-    final flat = rgbImageToFloat32(crop, size: _inputSize);
-    return _embedFromFlatInput(flat);
-  }
 
-  Future<FaceEmbeddingCapture?> _embedFromFlatInput(Float32List flat) async {
-    final input = _flatToModelInput(flat, _inputSize);
+    final input = FaceImagePipeline.toModelInput(crop, size: _inputSize);
     final output = List.generate(1, (_) => List<double>.filled(_outputDim, 0));
 
     final iso = _isolateInterpreter;
@@ -242,30 +170,8 @@ class TfliteFaceEmbedder {
 
     return FaceEmbeddingCapture(
       embedding: _l2Normalize(output[0]),
-      crop: img.Image(width: _inputSize, height: _inputSize),
+      crop: crop,
     );
-  }
-
-  static List<List<List<List<double>>>> _flatToModelInput(
-    Float32List flat,
-    int size,
-  ) {
-    final input = List.generate(
-      1,
-      (_) => List.generate(
-        size,
-        (_) => List.generate(size, (_) => List<double>.filled(3, 0)),
-      ),
-    );
-    var i = 0;
-    for (var y = 0; y < size; y++) {
-      for (var x = 0; x < size; x++) {
-        input[0][y][x][0] = flat[i++];
-        input[0][y][x][1] = flat[i++];
-        input[0][y][x][2] = flat[i++];
-      }
-    }
-    return input;
   }
 
   /// Backwards-compatible API for older callers — returns only the vector.

@@ -50,9 +50,8 @@ class MlKitFaceAnalyzer {
 
     try {
       if (_useSharedEnrollmentDetector) {
-        return await MlKitEnrollmentFaceDetector.instance.detectLiveFrame(
-          clone.frame,
-        );
+        return await MlKitEnrollmentFaceDetector.instance
+            .detectLiveFrame(clone.frame);
       }
       return await FaceMlDetectSerial.runEnrollment(
         () => _analyzeLiveFrame(clone.frame),
@@ -220,9 +219,7 @@ class MlKitFaceAnalyzer {
         );
       });
     } on TimeoutException {
-      return const NeuralCaptureResult.failure(
-        'Hold still — capture timed out',
-      );
+      return const NeuralCaptureResult.failure('Hold still — capture timed out');
     }
   }
 
@@ -279,7 +276,10 @@ class MlKitFaceAnalyzer {
       return FaceScanResult(message: analysis.message ?? 'Align your face');
     }
 
-    final result = await captureFromClone(clone: clone, face: analysis.face!);
+    final result = await captureFromClone(
+      clone: clone,
+      face: analysis.face!,
+    );
 
     if (!result.ok) {
       return FaceScanResult(message: result.message);
@@ -304,18 +304,14 @@ class MlKitFaceAnalyzer {
 
     final detector = _detector;
     if (detector == null) {
-      return const FaceFrameAnalysis(
-        faceCount: 0,
-        message: 'Detector unavailable',
-      );
+      return const FaceFrameAnalysis(faceCount: 0, message: 'Detector unavailable');
     }
 
     final input = InputImage.fromBytes(
       bytes: frame.bytes,
       metadata: InputImageMetadata(
         size: Size(frame.width.toDouble(), frame.height.toDouble()),
-        rotation:
-            InputImageRotationValue.fromRawValue(frame.rotationDegrees) ??
+        rotation: InputImageRotationValue.fromRawValue(frame.rotationDegrees) ??
             InputImageRotation.rotation0deg,
         format: frame.format == LiveCameraImageFormat.nv21
             ? InputImageFormat.nv21
@@ -392,18 +388,18 @@ class NeuralCaptureResult {
   });
 
   const NeuralCaptureResult.failure(String reason)
-    : this._(ok: false, message: reason);
+      : this._(ok: false, message: reason);
 
   const NeuralCaptureResult.success({
     required List<double> embedding,
     double sharpness = 0,
     double brightness = 0,
   }) : this._(
-         ok: true,
-         embedding: embedding,
-         sharpness: sharpness,
-         brightness: brightness,
-       );
+          ok: true,
+          embedding: embedding,
+          sharpness: sharpness,
+          brightness: brightness,
+        );
 
   final bool ok;
   final List<double>? embedding;
