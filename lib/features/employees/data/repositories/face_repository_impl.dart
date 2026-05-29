@@ -334,34 +334,37 @@ class FaceRepositoryImpl implements FaceRepository {
     try {
       final gallery = await _loadGallery(forceRefresh: true);
       final employeesEither = await _employees.getEmployees();
-      return employeesEither.fold(Left.new, (list) async {
-        var changed = false;
-        final updated = <Employee>[];
-        updated.length = list.length;
+      if (employeesEither.isLeft()) {
+        return Left(employeesEither.getLeft().toNullable()!);
+      }
 
-        for (var i = 0; i < list.length; i++) {
-          final e = list[i];
-          final profile = _galleryProfileForEmployee(e, gallery);
-          final hasEmbedding = profile != null;
-          final hash = hasEmbedding ? FaceProfileParser.contentHash(profile) : null;
-          if (e.faceRegistered != hasEmbedding || e.faceProfileHash != hash) {
-            changed = true;
-            updated[i] = e.copyWith(
+      final list = employeesEither.getOrElse((_) => <Employee>[]);
+      var changed = false;
+      final updated = <Employee>[];
+
+      for (final e in list) {
+        final profile = _galleryProfileForEmployee(e, gallery);
+        final hasEmbedding = profile != null;
+        final hash = hasEmbedding ? FaceProfileParser.contentHash(profile) : null;
+        if (e.faceRegistered != hasEmbedding || e.faceProfileHash != hash) {
+          changed = true;
+          updated.add(
+            e.copyWith(
               faceRegistered: hasEmbedding,
               faceProfileHash: hash,
               clearFaceProfileHash: !hasEmbedding,
-            );
-          } else {
-            updated[i] = e;
-          }
+            ),
+          );
+        } else {
+          updated.add(e);
         }
+      }
 
-        if (!changed) return const Right(null);
+      if (!changed) return const Right(null);
 
-        // IMPORTANT: Avoid per-employee Hive read/write loops here.
-        // Saving one-by-one makes first-load on large rosters feel frozen.
-        return await _employees.replaceAll(updated);
-      });
+      // IMPORTANT: Avoid per-employee Hive read/write loops here.
+      // Saving one-by-one makes first-load on large rosters feel frozen.
+      return await _employees.replaceAll(updated);
     } on CacheException catch (e) {
       return Left(CacheFailure(e.message));
     }

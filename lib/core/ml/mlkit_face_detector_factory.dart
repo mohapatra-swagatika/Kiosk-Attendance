@@ -1,6 +1,5 @@
 import 'dart:io' show Platform;
 
-import 'package:attendance_kiosk_app/core/camera/camera_runtime.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 /// Central ML Kit face detector configuration (accurate + tracking).
@@ -47,15 +46,25 @@ class MlKitFaceDetectorFactory {
         minFaceSize: 0.09,
       );
 
+  /// iOS kiosk live stream — fast mode keeps preview fluid; classification
+  /// supports blink / head-pose without accurate-mode UI-thread stalls.
+  static FaceDetectorOptions iosKioskStreamOptions() => FaceDetectorOptions(
+        performanceMode: FaceDetectorMode.fast,
+        enableLandmarks: true,
+        enableContours: false,
+        enableClassification: true,
+        enableTracking: true,
+        minFaceSize: 0.10,
+      );
+
   static FaceDetector createEnrollment() => FaceDetector(
         options: enrollmentStreamOptions(),
       );
 
   static FaceDetector createKiosk() {
-    // iPad: fast mode keeps preview fluid (accurate mode can stall the UI thread).
-    final useFast = Platform.isAndroid || CameraRuntime.isTabletLayout;
-    return FaceDetector(
-      options: useFast ? androidKioskOptions() : kioskOptions(),
-    );
+    if (Platform.isAndroid) {
+      return FaceDetector(options: androidKioskOptions());
+    }
+    return FaceDetector(options: iosKioskStreamOptions());
   }
 }

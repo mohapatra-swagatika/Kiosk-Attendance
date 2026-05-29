@@ -22,7 +22,17 @@ class EmployeeLocalDataSourceImpl implements EmployeeLocalDataSource {
       final raw = _box.get(HiveKeys.employees);
       if (raw is! String || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>;
-      return list.map((e) => EmployeeModel.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      final models = <EmployeeModel>[];
+      for (final item in list) {
+        if (item is! Map) continue;
+        final map = item is Map<String, dynamic>
+            ? item
+            : item.map((k, v) => MapEntry(k.toString(), v));
+        final id = map['id']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        models.add(EmployeeModel.fromJson(map));
+      }
+      return models;
     } catch (e) {
       throw CacheException('Failed to read employees: $e');
     }

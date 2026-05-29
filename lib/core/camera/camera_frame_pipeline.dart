@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:camera/camera.dart';
+
 /// Keeps only the latest camera frame when ML is busy (prevents backlog / frozen preview).
 ///
 /// The camera plugin delivers frames on a background thread; this coordinator

@@ -48,8 +48,8 @@ class KioskRecognitionPipeline {
   KioskRecognitionPipeline({
     required KioskFaceAnalyzer analyzer,
     required FaceRepository faceRepository,
-  })  : _analyzer = analyzer,
-        _faces = faceRepository;
+  }) : _analyzer = analyzer,
+       _faces = faceRepository;
 
   final KioskFaceAnalyzer _analyzer;
   final FaceRepository _faces;
@@ -66,6 +66,7 @@ class KioskRecognitionPipeline {
 
   /// Recent embeddings for the active ML Kit track — fused before match.
   final List<List<double>> _probeRing = [];
+
   /// Fewer fused probes → less blurring of identity across head movement.
   static const int _maxProbeRing = 2;
 
@@ -216,40 +217,34 @@ class KioskRecognitionPipeline {
       probePitch: face.headEulerAngleX,
     );
 
-    return matchEither.fold(
-      (f) => KioskPipelineStatus(f.message),
-      (outcome) {
-        if (outcome.rejected || outcome.employeeId == null) {
-          return _handleReject(outcome, session);
-        }
+    return matchEither.fold((f) => KioskPipelineStatus(f.message), (outcome) {
+      if (outcome.rejected || outcome.employeeId == null) {
+        return _handleReject(outcome, session);
+      }
 
-        final id = outcome.employeeId!;
-        session.refreshFaceLock(id);
+      final id = outcome.employeeId!;
+      session.refreshFaceLock(id);
 
-        if (session.isEmployeeOnCooldown(id)) {
-          session.clearUnknownStreak();
-          return const KioskPipelineIdle();
-        }
+      if (session.isEmployeeOnCooldown(id)) {
+        session.clearUnknownStreak();
+        return const KioskPipelineIdle();
+      }
 
-        if (!session.registerMatchCandidate(
-          id,
-          confidence: outcome.confidence,
-          margin: outcome.margin,
-          yaw: face.headEulerAngleY,
-          pitch: face.headEulerAngleX,
-        )) {
-          return const KioskPipelineIdle();
-        }
+      if (!session.registerMatchCandidate(
+        id,
+        confidence: outcome.confidence,
+        margin: outcome.margin,
+        yaw: face.headEulerAngleY,
+        pitch: face.headEulerAngleX,
+      )) {
+        return const KioskPipelineIdle();
+      }
 
-        FaceMatchDebugLog.log(
-          'Kiosk match $id conf=${outcome.confidence.toStringAsFixed(4)}',
-        );
-        return KioskPipelineMatch(
-          employeeId: id,
-          confidence: outcome.confidence,
-        );
-      },
-    );
+      FaceMatchDebugLog.log(
+        'Kiosk match $id conf=${outcome.confidence.toStringAsFixed(4)}',
+      );
+      return KioskPipelineMatch(employeeId: id, confidence: outcome.confidence);
+    });
   }
 
   KioskPipelineTick _handleReject(

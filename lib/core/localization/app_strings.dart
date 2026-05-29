@@ -144,6 +144,7 @@ class RegistrationStrings {
 
   static const String submit = 'Register';
   static const String submitting = 'Registering…';
+  static const String preparingStorage = 'Preparing storage…';
 
   static const String adminPinDialogTitle = 'Save your admin PIN';
   static const String adminPinDialogBody =
@@ -357,6 +358,19 @@ class FaceIdStrings {
 
 class KioskStrings {
   KioskStrings._();
+
+  static const String preparingCamera = 'Preparing camera…';
+  static const String processing = 'Processing…';
+  static const String connectingServices = 'Connecting services…';
+  static const String initializingFaceDetection = 'Initializing face detection…';
+  static const String preparingRecognition = 'Preparing recognition…';
+  static const String loadingFaceModel = 'Loading face recognition model…';
+  static const String processingProfiles = 'Processing face profiles…';
+  static const String startingCameraFeed = 'Starting camera feed…';
+  static const String initPleaseWait = 'This may take a moment on first launch.';
+  static const String servicesUnavailable =
+      'Services unavailable — check your connection and try again.';
+  static const String noCameraAvailable = 'No camera available on this device.';
 
   static const String scanning = 'Align your face — scanning…';
   static const String scanningShort = 'Scanning…';

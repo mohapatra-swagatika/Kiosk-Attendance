@@ -7,22 +7,35 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'package:attendance_kiosk_app/app/bootstrap.dart' show appFaceEmbedder;
 import 'package:attendance_kiosk_app/core/camera/camera_frame_pipeline.dart';
 import 'package:attendance_kiosk_app/core/camera/camera_scan_lifecycle.dart';
 import 'package:attendance_kiosk_app/core/camera/kiosk_attendance_photo_capture.dart';
 import 'package:attendance_kiosk_app/core/camera/camera_session_helper.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
-import 'package:attendance_kiosk_app/app/bootstrap.dart' show appFaceEmbedder;
+import 'package:attendance_kiosk_app/core/ml/camera_frame_clone.dart';
+import 'package:attendance_kiosk_app/core/ui/ui_yield.dart';
 import 'package:attendance_kiosk_app/features/attendance/presentation/providers/attendance_providers.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
 import 'package:attendance_kiosk_app/features/employees/presentation/providers/employee_providers.dart';
 import 'package:attendance_kiosk_app/features/face_id/presentation/widgets/face_id_scanner_overlay.dart';
 import 'package:attendance_kiosk_app/features/kiosk/domain/kiosk_recognition_pipeline.dart';
+import 'package:attendance_kiosk_app/features/kiosk/presentation/kiosk_face_stack_warmup.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/kiosk_ui_presenter.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/providers/kiosk_face_providers.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/providers/kiosk_scan_session.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/employee_match_dialog.dart';
+import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/kiosk_camera_loading_view.dart';
 import 'package:attendance_kiosk_app/features/kiosk/presentation/widgets/no_employee_dialog.dart';
+
+enum _KioskBootPhase {
+  preparingCamera,
+  loadingModel,
+  processingProfiles,
+  initializingFaceDetection,
+  ready,
+  error,
+}
 
 /// Face-scan kiosk panel — recognition pipeline unchanged.
 class KioskCameraPanel extends ConsumerStatefulWidget {
@@ -38,10 +51,22 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
   KioskRecognitionPipeline? _pipeline;
   final _ui = KioskUiPresenter();
   final _framePipeline = CameraFramePipeline();
+  final _warmup = KioskFaceStackWarmup.instance;
   DateTime? _mlStreamStartedAt;
   DateTime _lastUiRebuild = DateTime.fromMillisecondsSinceEpoch(0);
   int _galleryCount = 0;
   final Map<String, Employee> _employeesById = {};
+
+  _KioskBootPhase _bootPhase = _KioskBootPhase.preparingCamera;
+  String _loadingMessage = KioskStrings.preparingCamera;
+  bool _mlStackReady = false;
+  bool _mlPrimeInProgress = false;
+  bool _livePipelineWarmed = false;
+  bool _liveWarmupRunning = false;
+  bool _showRetry = false;
+
+  bool get _showRecognitionUi =>
+      _bootPhase == _KioskBootPhase.ready && _mlStackReady && _camera != null;
 
   @override
   CameraController? get lifecycleCamera => _camera;
@@ -53,13 +78,20 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
   void Function(CameraImage image)? get lifecycleOnFrame => _onCameraFrame;
 
   void _onCameraFrame(CameraImage image) {
+    if (!_mlStackReady) {
+      _framePipeline.submit(image: image, processor: _primeMlOnFrame);
+      return;
+    }
     _framePipeline.submit(image: image, processor: _processFrame);
   }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_bootstrap()));
+    _warmup.schedule();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_bootstrap()),
+    );
   }
 
   @override
@@ -71,10 +103,57 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
     super.dispose();
   }
 
+  List<KioskLoadingStep> get _loadingSteps => [
+    KioskLoadingStep(
+      label: KioskStrings.preparingCamera,
+      complete:
+          _bootPhase.index > _KioskBootPhase.preparingCamera.index ||
+          _bootPhase == _KioskBootPhase.ready,
+      active: _bootPhase == _KioskBootPhase.preparingCamera,
+    ),
+    KioskLoadingStep(
+      label: KioskStrings.loadingFaceModel,
+      complete:
+          _bootPhase.index > _KioskBootPhase.loadingModel.index ||
+          _bootPhase == _KioskBootPhase.ready,
+      active: _bootPhase == _KioskBootPhase.loadingModel,
+    ),
+    KioskLoadingStep(
+      label: KioskStrings.processingProfiles,
+      complete:
+          _bootPhase.index > _KioskBootPhase.processingProfiles.index ||
+          _bootPhase == _KioskBootPhase.ready,
+      active: _bootPhase == _KioskBootPhase.processingProfiles,
+    ),
+    KioskLoadingStep(
+      label: KioskStrings.initializingFaceDetection,
+      complete: _mlStackReady,
+      active: _bootPhase == _KioskBootPhase.initializingFaceDetection,
+    ),
+  ];
+
+  void _setBootPhase(
+    _KioskBootPhase phase,
+    String message, {
+    bool showRetry = false,
+  }) {
+    if (!mounted) return;
+    _bootPhase = phase;
+    _loadingMessage = message;
+    _showRetry = showRetry;
+    if (phase != _KioskBootPhase.ready) {
+      _ui.setInitializing(message);
+    }
+    setState(() {});
+  }
+
   Future<void> _bootstrap() async {
     if (!mounted) return;
-    _ui.setInitializing(FaceRegistrationStrings.preparingCamera);
-    _scheduleUiRebuild();
+    _setBootPhase(
+      _KioskBootPhase.preparingCamera,
+      KioskStrings.preparingCamera,
+    );
+    await yieldToUi(frames: 2);
 
     _pipeline = KioskRecognitionPipeline(
       analyzer: ref.read(kioskFaceAnalyzerProvider),
@@ -83,49 +162,66 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
 
     unawaited(_initCamera());
 
-    // Lazily load the TFLite embedder inside kiosk flow to avoid blocking
-    // app startup / navigation / text input on first launch.
     if (!appFaceEmbedder.isReady) {
-      _ui.setInitializing('Loading face recognition model…');
-      _scheduleUiRebuild();
+      _setBootPhase(
+        _KioskBootPhase.loadingModel,
+        KioskStrings.loadingFaceModel,
+      );
       await appFaceEmbedder.initialize();
       if (!mounted) return;
     }
 
-    final preloadEither = await ref.read(faceRepositoryProvider).preloadGallery();
+    _setBootPhase(_KioskBootPhase.loadingModel, KioskStrings.processing);
+    await appFaceEmbedder.warmUpInference();
+    ref.read(kioskFaceAnalyzerProvider).markEmbedPathWarmed();
+    if (!mounted) return;
+
+    _setBootPhase(
+      _KioskBootPhase.processingProfiles,
+      KioskStrings.processingProfiles,
+    );
+    await yieldToUi(frames: 2);
+
+    final preloadEither = await ref
+        .read(faceRepositoryProvider)
+        .preloadGallery();
     if (!mounted) return;
 
     preloadEither.fold(
-      (f) {
-        _ui.setInitializing(f.message);
-        _scheduleUiRebuild();
-      },
-      (count) {
-        _galleryCount = count;
-        _ui.setReady(enrolledCount: count);
-        _scheduleUiRebuild();
-      },
+      (f) => _setBootPhase(_KioskBootPhase.error, f.message, showRetry: true),
+      (count) => _galleryCount = count,
     );
+    if (_bootPhase == _KioskBootPhase.error) return;
+
+    if (_mlStackReady) {
+      _finishBoot();
+    } else {
+      _setBootPhase(
+        _KioskBootPhase.initializingFaceDetection,
+        KioskStrings.initializingFaceDetection,
+      );
+    }
 
     final employees = await ref.read(employeesListProvider.future);
+    if (!mounted) return;
     _employeesById.addEntries(employees.map((e) => MapEntry(e.id, e)));
+  }
+
+  void _finishBoot() {
+    if (!mounted || _bootPhase == _KioskBootPhase.error) return;
+    _ui.setReady(enrolledCount: _galleryCount);
+    _setBootPhase(_KioskBootPhase.ready, _ui.snapshot.message);
   }
 
   Future<void> _initCamera() async {
     final perm = await Permission.camera.request();
-    if (!perm.isGranted) {
-      if (mounted) {
-        _ui.setInitializing(KioskStrings.cameraPermissionRequired);
-        _scheduleUiRebuild();
-      }
-      return;
-    }
+    if (!mounted) return;
 
-    if (perm.isPermanentlyDenied) {
-      if (mounted) {
-        _ui.setInitializing(KioskStrings.cameraPermissionRequired);
-        _scheduleUiRebuild();
-      }
+    if (!perm.isGranted || perm.isPermanentlyDenied) {
+      _setBootPhase(
+        _KioskBootPhase.error,
+        KioskStrings.cameraPermissionRequired,
+      );
       return;
     }
 
@@ -133,12 +229,22 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
     if (!mounted) return;
 
     if (controller == null) {
-      _ui.setInitializing('No camera available');
-      _scheduleUiRebuild();
+      _setBootPhase(
+        _KioskBootPhase.error,
+        KioskStrings.noCameraAvailable,
+        showRetry: true,
+      );
       return;
     }
 
     setState(() => _camera = controller);
+
+    if (_bootPhase.index < _KioskBootPhase.initializingFaceDetection.index) {
+      _setBootPhase(
+        _KioskBootPhase.initializingFaceDetection,
+        KioskStrings.initializingFaceDetection,
+      );
+    }
 
     await CameraSessionHelper.startImageStreamAfterPreview(
       controller: controller,
@@ -146,11 +252,73 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
       onFrame: _onCameraFrame,
     );
 
-    _mlStreamStartedAt = DateTime.now();
-    if (_galleryCount > 0) {
-      _ui.setReady(enrolledCount: _galleryCount);
-      _scheduleUiRebuild();
+    unawaited(_ensureMlStackReadyWithTimeout());
+  }
+
+  Future<void> _ensureMlStackReadyWithTimeout() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (mounted && !_mlStackReady && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
+    if (!mounted || _mlStackReady) return;
+    _mlStackReady = true;
+    _mlStreamStartedAt = DateTime.now();
+    _finishBoot();
+  }
+
+  /// Runs first ML Kit + TFLite pass under the loading overlay (not on live scan).
+  Future<void> _primeMlOnFrame(CameraImage image) async {
+    if (_mlStackReady || _mlPrimeInProgress) return;
+    _mlPrimeInProgress = true;
+    try {
+      final camera = _camera;
+      if (camera == null) return;
+
+      if (mounted && _bootPhase != _KioskBootPhase.initializingFaceDetection) {
+        _setBootPhase(
+          _KioskBootPhase.initializingFaceDetection,
+          KioskStrings.initializingFaceDetection,
+        );
+      }
+
+      final clone = CameraFrameClone.fromCameraImage(
+        image: image,
+        description: camera.description,
+        orientation: camera.value.deviceOrientation,
+      );
+      if (clone == null) return;
+
+      final analyzer = ref.read(kioskFaceAnalyzerProvider);
+      if (!analyzer.isModelPrimed) {
+        await analyzer.primeFromClone(clone);
+      }
+      await yieldToUi(frames: 2);
+      // Extra detect pass under the full loader (empty frame still warms ML Kit).
+      unawaited(analyzer.detectClone(clone));
+      if (appFaceEmbedder.isReady) {
+        await appFaceEmbedder.warmUpInference();
+        ref.read(kioskFaceAnalyzerProvider).markEmbedPathWarmed();
+      }
+
+      _mlStackReady = true;
+      _mlStreamStartedAt = DateTime.now();
+      if (mounted) _finishBoot();
+    } finally {
+      _mlPrimeInProgress = false;
+    }
+  }
+
+  Future<void> _retryBootstrap() async {
+    final c = _camera;
+    _camera = null;
+    _mlStackReady = false;
+    _mlPrimeInProgress = false;
+    _livePipelineWarmed = false;
+    _liveWarmupRunning = false;
+    await CameraSessionHelper.disposeCamera(c);
+    _bootPhase = _KioskBootPhase.preparingCamera;
+    _showRetry = false;
+    await _bootstrap();
   }
 
   void _scheduleUiRebuild({bool force = false}) {
@@ -168,19 +336,28 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
   Future<void> _processFrame(CameraImage image) async {
     final pipeline = _pipeline;
     final camera = _camera;
-    if (pipeline == null || camera == null) return;
+    if (pipeline == null || camera == null || !_mlStackReady) return;
 
     final scan = ref.read(kioskScanSessionProvider);
     if (scan.dialogOpen || scan.scanPaused) return;
 
     final started = _mlStreamStartedAt;
     if (started != null &&
-        DateTime.now().difference(started) < CameraSessionHelper.kioskMlSettleDelay) {
+        DateTime.now().difference(started) <
+            CameraSessionHelper.kioskMlSettleDelay) {
       return;
     }
 
-    // Empty gallery: no recognition work (preview-only).
     if (_galleryCount == 0) return;
+
+    if (!_livePipelineWarmed) {
+      if (!_liveWarmupRunning) {
+        await _runFirstFaceWarmup(image, camera);
+      }
+      if (!_livePipelineWarmed) return;
+      // Warm-up finished on this frame — scan begins on the next frame.
+      return;
+    }
 
     final session = ref.read(kioskScanSessionProvider.notifier);
     final tick = await pipeline.processFrame(
@@ -201,7 +378,10 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
         break;
       case KioskPipelineMatch(:final employeeId, :final confidence):
         unawaited(HapticFeedback.mediumImpact());
-        if (_ui.applyPipelineTick(tick, employeeName: _employeesById[employeeId]?.name)) {
+        if (_ui.applyPipelineTick(
+          tick,
+          employeeName: _employeesById[employeeId]?.name,
+        )) {
           _scheduleUiRebuild(force: true);
         }
         unawaited(_openMatchDialog(employeeId, confidence));
@@ -209,6 +389,41 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
         unawaited(HapticFeedback.heavyImpact());
         if (_ui.applyPipelineTick(tick)) _scheduleUiRebuild(force: true);
         unawaited(_showUnknown(reason));
+    }
+  }
+
+  /// Unlocks live scan once embed path was warmed at boot (no per-face JIT).
+  Future<bool> _runFirstFaceWarmup(
+    CameraImage image,
+    CameraController camera,
+  ) async {
+    if (_livePipelineWarmed) return true;
+
+    final analyzer = ref.read(kioskFaceAnalyzerProvider);
+    if (analyzer.isEmbedPathWarmed) {
+      _livePipelineWarmed = true;
+      return true;
+    }
+
+    // Fallback if boot warm-up did not run (e.g. model loaded late).
+    final clone = CameraFrameClone.fromCameraImage(
+      image: image,
+      description: camera.description,
+      orientation: camera.value.deviceOrientation,
+    );
+    if (clone == null) return false;
+
+    final analysis = await analyzer.detectClone(clone);
+    if (!analysis.hasSingleFace || analysis.face == null) return false;
+
+    _liveWarmupRunning = true;
+    await yieldToUi(frames: 2);
+    try {
+      await analyzer.warmRecognitionPath(clone: clone, face: analysis.face!);
+      _livePipelineWarmed = true;
+      return true;
+    } finally {
+      _liveWarmupRunning = false;
     }
   }
 
@@ -257,8 +472,9 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
     await pauseCameraScanning();
     if (!mounted) return;
 
-    final activeEither =
-        await ref.read(attendanceRepositoryProvider).getActiveCheckIn(matchedEmployee.id);
+    final activeEither = await ref
+        .read(attendanceRepositoryProvider)
+        .getActiveCheckIn(matchedEmployee.id);
     final active = activeEither.fold((_) => null, (a) => a);
     final isCheckOut = active != null && active.isActiveCheckIn;
 
@@ -269,11 +485,12 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
       employee: matchedEmployee,
       activeLog: active,
       confidence: confidence,
-      onCaptureAttendancePhoto: () => const KioskAttendancePhotoCapture().capture(
-        controller: _camera,
-        employeeId: matchedEmployee.id,
-        isCheckOut: isCheckOut,
-      ),
+      onCaptureAttendancePhoto: () =>
+          const KioskAttendancePhotoCapture().capture(
+            controller: _camera,
+            employeeId: matchedEmployee.id,
+            isCheckOut: isCheckOut,
+          ),
     );
 
     session.onDialogClosed(matched: true);
@@ -289,21 +506,36 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
   @override
   Widget build(BuildContext context) {
     final snap = _ui.snapshot;
+    final showLoader = !_showRecognitionUi;
+
     return ColoredBox(
       color: Colors.black,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (_camera != null)
-            CameraPreview(_camera!)
+          if (_camera != null && _camera!.value.isInitialized)
+            RepaintBoundary(child: CameraPreview(_camera!))
           else
-            const Center(child: CircularProgressIndicator(color: Colors.white54)),
-          FaceIdRecognitionOverlay(
-            status: snap.message,
-            subtitle: snap.subtitle,
-            isVerified: snap.isVerified,
-            isScanning: snap.isScanning && _galleryCount > 0,
-          ),
+            const ColoredBox(color: Colors.black),
+          if (showLoader)
+            KioskCameraLoadingView(
+              message: _loadingMessage,
+              subtitle: _bootPhase == _KioskBootPhase.error
+                  ? null
+                  : KioskStrings.initPleaseWait,
+              steps: _bootPhase == _KioskBootPhase.error
+                  ? const []
+                  : _loadingSteps,
+              showRetry: _showRetry,
+              onRetry: _showRetry ? () => unawaited(_retryBootstrap()) : null,
+            ),
+          if (_showRecognitionUi)
+            FaceIdRecognitionOverlay(
+              status: snap.message,
+              subtitle: snap.subtitle,
+              isVerified: snap.isVerified,
+              isScanning: snap.isScanning && _galleryCount > 0,
+            ),
         ],
       ),
     );

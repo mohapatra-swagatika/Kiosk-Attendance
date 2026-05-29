@@ -60,9 +60,15 @@ final employeesListProvider = FutureProvider<List<Employee>>((ref) async {
     final seed = ref.read(seedEmployeesIfEmptyUseCaseProvider);
     await seed(SeedEmployeesParams(ref.read(defaultDummyEmployeesProvider)));
   }
-  // Reconcile face flags in the background to keep first render smooth.
-  // This may update face badges a moment later on very large rosters.
-  unawaited(ref.read(faceRepositoryProvider).reconcileFaceRegistrationFlags());
+  // Reconcile face flags after the roster is shown — never during registration.
+  if (isPairedKiosk) {
+    unawaited(
+      Future<void>.delayed(
+        const Duration(seconds: 2),
+        () => ref.read(faceRepositoryProvider).reconcileFaceRegistrationFlags(),
+      ),
+    );
+  }
   final get = ref.read(getEmployeesUseCaseProvider);
   final result = await get(const NoParams());
   return result.fold((l) => throw StateError(l.message), (r) => r);

@@ -6,6 +6,7 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 
+import 'package:attendance_kiosk_app/core/ml/face_align_geometry.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 
@@ -47,12 +48,14 @@ class FaceImagePipeline {
   }) {
     final rgb = _cameraImageToRgb(cameraImage);
     if (rgb == null) return null;
+    final geometry = FaceAlignGeometry.fromFace(face);
+    if (geometry == null) return null;
     return _canonicalAlign(
       rgb: rgb,
       sourceWidth: cameraImage.width,
       sourceHeight: cameraImage.height,
       description: description,
-      face: face,
+      geometry: geometry,
       outputSize: outputSize,
     );
   }
@@ -61,19 +64,25 @@ class FaceImagePipeline {
   static img.Image? alignedFaceCropFromLiveFrame({
     required LiveCameraFrame frame,
     required CameraDescription description,
-    required Face face,
+    Face? face,
+    FaceAlignGeometry? geometry,
+    int? mlKitWidth,
+    int? mlKitHeight,
     int outputSize = 112,
   }) {
+    final resolved = geometry ?? (face != null ? FaceAlignGeometry.fromFace(face) : null);
+    if (resolved == null) return null;
+
     final rgb = _liveFrameToRgb(frame);
     if (rgb == null) return null;
-    // ML Kit landmark space must match [sourceWidth/Height] in _mapPoint.
-    final dims = mlKitReportedDims(frame);
+    final dimsW = mlKitWidth ?? mlKitReportedDims(frame).width;
+    final dimsH = mlKitHeight ?? mlKitReportedDims(frame).height;
     return _canonicalAlign(
       rgb: rgb,
-      sourceWidth: dims.width,
-      sourceHeight: dims.height,
+      sourceWidth: dimsW,
+      sourceHeight: dimsH,
       description: description,
-      face: face,
+      geometry: resolved,
       outputSize: outputSize,
     );
   }
@@ -85,19 +94,25 @@ class FaceImagePipeline {
     required int sourceWidth,
     required int sourceHeight,
     required CameraDescription description,
-    required Face face,
+    required FaceAlignGeometry geometry,
     required int outputSize,
   }) {
     final oriented = _applyCameraRotation(rgb, description);
 
-    final le = face.landmarks[FaceLandmarkType.leftEye]?.position;
-    final re = face.landmarks[FaceLandmarkType.rightEye]?.position;
-    if (le == null || re == null) return null;
-
     final srcLe = _mapPoint(
-        le.x.toDouble(), le.y.toDouble(), sourceWidth, sourceHeight, description);
+      geometry.leftEyeX,
+      geometry.leftEyeY,
+      sourceWidth,
+      sourceHeight,
+      description,
+    );
     final srcRe = _mapPoint(
-        re.x.toDouble(), re.y.toDouble(), sourceWidth, sourceHeight, description);
+      geometry.rightEyeX,
+      geometry.rightEyeY,
+      sourceWidth,
+      sourceHeight,
+      description,
+    );
 
     final dx = srcRe.x - srcLe.x;
     final dy = srcRe.y - srcLe.y;
@@ -149,7 +164,12 @@ class FaceImagePipeline {
 
   /// Bilinear sample with edge clamping (transparent border → black is bad).
   static (int, int, int) _bilinearSample(
-      img.Image src, double x, double y, int w, int h) {
+    img.Image src,
+    double x,
+    double y,
+    int w,
+    int h,
+  ) {
     var cx = x.clamp(0.0, (w - 1).toDouble());
     var cy = y.clamp(0.0, (h - 1).toDouble());
     final x0 = cx.floor();
@@ -229,15 +249,15 @@ class FaceImagePipeline {
 
   /// Converts an `img.Image` (112x112 RGB) to a TFLite input buffer of shape
   /// `[1, size, size, 3]` with values in `[-1, 1]`.
-  static List<List<List<List<double>>>> toModelInput(img.Image image, {int size = 112}) {
+  static List<List<List<List<double>>>> toModelInput(
+    img.Image image, {
+    int size = 112,
+  }) {
     final input = List.generate(
       1,
       (_) => List.generate(
         size,
-        (_) => List.generate(
-          size,
-          (_) => List<double>.filled(3, 0),
-        ),
+        (_) => List.generate(size, (_) => List<double>.filled(3, 0)),
       ),
     );
     for (var y = 0; y < size; y++) {
@@ -316,16 +336,19 @@ class FaceImagePipeline {
 
   static img.Image? _cameraImageToRgb(CameraImage image) {
     if (Platform.isAndroid) {
-      if (image.format.group == ImageFormatGroup.nv21 || image.planes.length == 1) {
+      if (image.format.group == ImageFormatGroup.nv21 ||
+          image.planes.length == 1) {
         return _nv21ToRgb(image);
       }
-      if (image.format.group == ImageFormatGroup.yuv420 && image.planes.length >= 3) {
+      if (image.format.group == ImageFormatGroup.yuv420 &&
+          image.planes.length >= 3) {
         return _yuv420ToRgb(image);
       }
       return null;
     }
     if (Platform.isIOS) {
-      if (image.format.group == ImageFormatGroup.bgra8888 && image.planes.isNotEmpty) {
+      if (image.format.group == ImageFormatGroup.bgra8888 &&
+          image.planes.isNotEmpty) {
         return _bgraToRgb(image);
       }
       return null;
@@ -438,7 +461,13 @@ class FaceImagePipeline {
     return rotated;
   }
 
-  static _Point _mapPoint(double x, double y, int srcW, int srcH, CameraDescription d) {
+  static _Point _mapPoint(
+    double x,
+    double y,
+    int srcW,
+    int srcH,
+    CameraDescription d,
+  ) {
     var px = x;
     var py = y;
     final rot = d.sensorOrientation;
@@ -479,7 +508,6 @@ class FaceImagePipeline {
     }
     return _Point(px, py);
   }
-
 }
 
 class _Point {

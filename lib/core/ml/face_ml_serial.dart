@@ -44,6 +44,15 @@ class FaceMlDetectSerial {
             : const Duration(milliseconds: 320),
       );
 
+  /// One-time ML Kit model load for kiosk (still frame before live stream).
+  static Future<T> runKioskPrime<T>(
+    Future<T> Function() action,
+  ) =>
+      runWithTimeout(
+        action,
+        timeout: const Duration(seconds: 18),
+      );
+
   static Future<T> runWithTimeout<T>(
     Future<T> Function() action, {
     required Duration timeout,

@@ -85,19 +85,25 @@ class KioskConfigRepositoryImpl implements KioskConfigRepository {
 
       final snapshotStore = _employeeSnapshotStore;
       if (snapshotStore != null) {
-        final snapshotResult = await snapshotStore.fetchAndStoreForConfig(repaired);
-        snapshotResult.fold(
-          (failure) {
-            if (kDebugMode) {
-              debugPrint('[KioskPair] Employee snapshot: ${failure.message}');
-            }
-          },
-          (count) {
-            if (kDebugMode) {
-              debugPrint('[KioskPair] Employee snapshot stored ($count employees)');
-            }
-          },
-        );
+        try {
+          final snapshotResult = await snapshotStore.fetchAndStoreForConfig(repaired);
+          snapshotResult.fold(
+            (failure) {
+              if (kDebugMode) {
+                debugPrint('[KioskPair] Employee snapshot: ${failure.message}');
+              }
+            },
+            (count) {
+              if (kDebugMode) {
+                debugPrint('[KioskPair] Employee snapshot stored ($count employees)');
+              }
+            },
+          );
+        } catch (e, st) {
+          if (kDebugMode) {
+            debugPrint('[KioskPair] Employee snapshot error (pair still saved): $e\n$st');
+          }
+        }
       }
 
       return const Right(null);

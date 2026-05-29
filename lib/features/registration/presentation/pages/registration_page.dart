@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:attendance_kiosk_app/app/app_launch_gate.dart';
+import 'package:attendance_kiosk_app/app/app_startup_coordinator.dart';
 import 'package:attendance_kiosk_app/app/router/router_refresh.dart';
 import 'package:attendance_kiosk_app/app/router/route_paths.dart';
 import 'package:attendance_kiosk_app/core/api/kiosk_pair_api_urls.dart';
@@ -45,6 +47,14 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
     _machine.addListener(_onFieldsChanged);
     _description.addListener(_onFieldsChanged);
     _onFieldsChanged();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _redirectIfAlreadyRegistered());
+  }
+
+  void _redirectIfAlreadyRegistered() {
+    if (!mounted) return;
+    if (AppLaunchGate.isCached && AppLaunchGate.cached.hasConfig) {
+      context.go(RoutePaths.kiosk);
+    }
   }
 
   @override
@@ -63,6 +73,7 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!ref.read(appStartupCoordinatorProvider).storageReady) return;
 
     final config = KioskConfig(
       code: _code.text.trim(),
@@ -121,17 +132,29 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
     if (!mounted) return;
     ref.invalidate(kioskConfigProvider);
-    ref.read(routerRefreshProvider).notify();
+    await ref.read(routerRefreshProvider).reloadAndNotify();
+    if (!mounted) return;
     context.go(RoutePaths.kiosk);
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(
+      appStartupCoordinatorProvider.select((s) => s.storageReady),
+      (prev, ready) {
+        if (ready == true) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _redirectIfAlreadyRegistered(),
+          );
+        }
+      },
+    );
     final isSubmitting =
         ref.watch(registrationFormProvider.select((s) => s.isSubmitting));
     final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -174,12 +197,15 @@ class _RegistrationPageState extends ConsumerState<RegistrationPage> {
 
               // Same centered form layout on mobile and tablet (hero panel disabled).
               return Center(
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: horizontalPadding,
-                    vertical: isTablet ? 24 : 16,
+                child: RepaintBoundary(
+                  child: SingleChildScrollView(
+                    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: horizontalPadding,
+                      vertical: isTablet ? 24 : 16,
+                    ),
+                    child: form,
                   ),
-                  child: form,
                 ),
               );
 
@@ -369,55 +395,6 @@ class _RegistrationFormCard extends StatelessWidget {
 
     final fieldGap = twoColumnFields ? 16.0 : 12.0;
 
-    Widget submitButton(bool canSubmit) {
-      final registerEnabled = canSubmit && !isSubmitting;
-      if (twoColumnFields) {
-        return Align(
-          alignment: Alignment.centerRight,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 28,
-                vertical: 18,
-              ),
-              minimumSize: const Size(200, 52),
-            ),
-            onPressed: registerEnabled ? onSubmit : null,
-            icon: isSubmitting
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.app_registration_rounded),
-            label: Text(
-              isSubmitting ? RegistrationStrings.submitting : RegistrationStrings.submit,
-            ),
-          ),
-        );
-      }
-      return FilledButton.icon(
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 16,
-          ),
-          minimumSize: const Size(double.infinity, 52),
-        ),
-        onPressed: registerEnabled ? onSubmit : null,
-        icon: isSubmitting
-            ? const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.app_registration_rounded),
-        label: Text(
-          isSubmitting ? RegistrationStrings.submitting : RegistrationStrings.submit,
-        ),
-      );
-    }
-
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: GlassPanel(
@@ -430,6 +407,7 @@ class _RegistrationFormCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              const _RegistrationStorageBanner(),
               Text(
                 RegistrationStrings.heroTitle,
                 style: textTheme.titleLarge?.copyWith(
@@ -463,14 +441,109 @@ class _RegistrationFormCard extends StatelessWidget {
               SizedBox(height: fieldGap),
               descriptionField(),
               SizedBox(height: twoColumnFields ? 28 : 22),
-              ValueListenableBuilder<bool>(
-                valueListenable: canSubmitListenable,
-                builder: (context, can, _) => submitButton(can),
+              _RegistrationSubmitButton(
+                isSubmitting: isSubmitting,
+                canSubmitListenable: canSubmitListenable,
+                onSubmit: onSubmit,
+                twoColumnFields: twoColumnFields,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Isolated from text fields so storage init does not rebuild inputs mid-focus.
+class _RegistrationStorageBanner extends ConsumerWidget {
+  const _RegistrationStorageBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storageReady = ref.watch(
+      appStartupCoordinatorProvider.select((s) => s.storageReady),
+    );
+    if (storageReady) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 16),
+      child: LinearProgressIndicator(minHeight: 3),
+    );
+  }
+}
+
+class _RegistrationSubmitButton extends ConsumerWidget {
+  const _RegistrationSubmitButton({
+    required this.isSubmitting,
+    required this.canSubmitListenable,
+    required this.onSubmit,
+    required this.twoColumnFields,
+  });
+
+  final bool isSubmitting;
+  final ValueListenable<bool> canSubmitListenable;
+  final VoidCallback onSubmit;
+  final bool twoColumnFields;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storageReady = ref.watch(
+      appStartupCoordinatorProvider.select((s) => s.storageReady),
+    );
+
+    Widget submitButton(bool canSubmit) {
+      final registerEnabled = canSubmit && !isSubmitting && storageReady;
+      final label = !storageReady
+          ? RegistrationStrings.preparingStorage
+          : isSubmitting
+              ? RegistrationStrings.submitting
+              : RegistrationStrings.submit;
+      if (twoColumnFields) {
+        return Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 28,
+                vertical: 18,
+              ),
+              minimumSize: const Size(200, 52),
+            ),
+            onPressed: registerEnabled ? onSubmit : null,
+            icon: isSubmitting || !storageReady
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.app_registration_rounded),
+            label: Text(label),
+          ),
+        );
+      }
+      return FilledButton.icon(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 16,
+          ),
+          minimumSize: const Size(double.infinity, 52),
+        ),
+        onPressed: registerEnabled ? onSubmit : null,
+        icon: isSubmitting || !storageReady
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.app_registration_rounded),
+        label: Text(label),
+      );
+    }
+
+    return ValueListenableBuilder<bool>(
+      valueListenable: canSubmitListenable,
+      builder: (context, can, _) => submitButton(can),
     );
   }
 }

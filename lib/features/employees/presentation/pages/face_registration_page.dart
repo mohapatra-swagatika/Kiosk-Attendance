@@ -120,7 +120,9 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     if (employees != null) {
       for (final e in employees) {
         if (e.id == widget.employeeId) {
-          _employeeDisplayName = e.name.trim().isNotEmpty ? e.name.trim() : null;
+          _employeeDisplayName = e.name.trim().isNotEmpty
+              ? e.name.trim()
+              : null;
           _employeeDisplayCode = e.employeeCode?.isNotEmpty == true
               ? e.employeeCode!
               : null;
@@ -146,8 +148,7 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
   String get _snackbarEmployeeLabel =>
       _employeeDisplayName ?? widget.employeeId;
 
-  String get _alreadyEnrolledLabel =>
-      _employeeDisplayCode ?? widget.employeeId;
+  String get _alreadyEnrolledLabel => _employeeDisplayCode ?? widget.employeeId;
 
   /// Keeps the ring filling smoothly between ML Kit frames (~60fps).
   void _onUiTick(Duration _) {
@@ -325,7 +326,9 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
 
       double? smoothCx;
       double? smoothCy;
-      if (Platform.isAndroid && analysis.hasSingleFace && analysis.face != null) {
+      if (Platform.isAndroid &&
+          analysis.hasSingleFace &&
+          analysis.face != null) {
         final c = analysis.face!.boundingBox.center;
         final s = _faceTrackSmoother.smooth(c.dx, c.dy);
         smoothCx = s.dx;

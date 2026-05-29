@@ -50,7 +50,7 @@ class EmployeeSnapshotStore {
             .toList(),
         faceProfiles: snapshot.faceProfiles,
       );
-      return applySnapshot(resolved);
+      return await applySnapshot(resolved);
     } on RegistrationApiException catch (e) {
       return Left(
         e.isNetworkError ? NetworkFailure(e.message) : ValidationFailure(e.message),
