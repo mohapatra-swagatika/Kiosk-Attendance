@@ -40,8 +40,17 @@ class FaceMlDetectSerial {
       runWithTimeout(
         action,
         timeout: Platform.isAndroid
-            ? const Duration(milliseconds: 260)
+            ? const Duration(milliseconds: 340)
             : const Duration(milliseconds: 320),
+      );
+
+  /// Android kiosk ML Kit detect — one serial hop, enough time for NV21 inference.
+  static Future<T> runAndroidKioskDetect<T>(
+    Future<T> Function() action,
+  ) =>
+      runWithTimeout(
+        action,
+        timeout: const Duration(milliseconds: 560),
       );
 
   static Future<T> runWithTimeout<T>(
@@ -84,7 +93,7 @@ class FaceMlEmbedSerial {
       runWithTimeout(
         action,
         timeout: Platform.isAndroid
-            ? const Duration(milliseconds: 480)
+            ? const Duration(milliseconds: 560)
             : const Duration(milliseconds: 550),
       );
 

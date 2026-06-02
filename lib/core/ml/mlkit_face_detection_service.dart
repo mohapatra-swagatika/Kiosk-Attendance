@@ -5,9 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
+import 'package:attendance_kiosk_app/core/ml/enrollment_face_picker.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
 import 'package:attendance_kiosk_app/core/ml/face_frame_analysis.dart';
 import 'package:attendance_kiosk_app/core/ml/face_ml_serial.dart';
+import 'package:attendance_kiosk_app/core/ml/face_recognition_trace.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_detector_factory.dart';
 
 /// ML Kit on Android rotates NV21 frames internally and returns face
@@ -74,53 +76,95 @@ class MlKitEnrollmentFaceDetector {
   }
 
   Future<FaceFrameAnalysis> detectLiveFrame(LiveCameraFrame frame) {
-    return FaceMlDetectSerial.runEnrollment(() async {
-      if (_closed) {
-        return const FaceFrameAnalysis(faceCount: 0, message: 'Detector closed');
-      }
+    return FaceMlDetectSerial.runEnrollment(() => _detectUncoordinated(frame));
+  }
 
-      final input = InputImage.fromBytes(
-        bytes: frame.bytes,
-        metadata: InputImageMetadata(
-          size: Size(frame.width.toDouble(), frame.height.toDouble()),
-          rotation:
-              InputImageRotationValue.fromRawValue(frame.rotationDegrees) ??
-                  InputImageRotation.rotation0deg,
-          format: frame.format == LiveCameraImageFormat.nv21
-              ? InputImageFormat.nv21
-              : InputImageFormat.bgra8888,
-          bytesPerRow: frame.bytesPerRow,
-        ),
-      );
+  /// Kiosk-only: caller must wrap in [FaceMlDetectSerial.runAndroidKioskDetect]
+  /// (single queue hop). Do not nest inside [runEnrollment] — that caused 340ms
+  /// timeouts while native detect still ran, leaving no cached face.
+  Future<FaceFrameAnalysis> detectLiveFrameForKiosk(LiveCameraFrame frame) {
+    return _detectUncoordinated(frame);
+  }
 
-      final faces = await _detector.processImage(input);
-      _modelPrimed = true;
+  Future<FaceFrameAnalysis> _detectUncoordinated(LiveCameraFrame frame) async {
+    if (_closed) {
+      return const FaceFrameAnalysis(faceCount: 0, message: 'Detector closed');
+    }
+
+    if (FaceRecognitionTrace.enrollmentTraceEnabled &&
+        Platform.isAndroid &&
+        !_modelPrimed) {
       final dims = mlKitReportedDims(frame);
+      FaceRecognitionTrace.log(
+        'ENROLL_FRAME',
+        'fmt=${frame.format} raw=${frame.width}x${frame.height} rot=${frame.rotationDegrees} '
+        'ml=${dims.width}x${dims.height} bpr=${frame.bytesPerRow}',
+      );
+    }
 
-      if (faces.isEmpty) {
-        return FaceFrameAnalysis(
-          faceCount: 0,
-          message: 'Align your face inside the frame',
-          imageWidth: dims.width,
-          imageHeight: dims.height,
-        );
-      }
-      if (faces.length > 1) {
-        return FaceFrameAnalysis(
-          faceCount: faces.length,
-          message: 'Only one person at a time',
-          imageWidth: dims.width,
-          imageHeight: dims.height,
-        );
-      }
+    final input = InputImage.fromBytes(
+      bytes: frame.bytes,
+      metadata: InputImageMetadata(
+        size: Size(frame.width.toDouble(), frame.height.toDouble()),
+        rotation:
+            InputImageRotationValue.fromRawValue(frame.rotationDegrees) ??
+                InputImageRotation.rotation0deg,
+        format: frame.format == LiveCameraImageFormat.nv21
+            ? InputImageFormat.nv21
+            : InputImageFormat.bgra8888,
+        bytesPerRow: frame.bytesPerRow,
+      ),
+    );
 
+    final faces = await _detector.processImage(input);
+    _modelPrimed = true;
+    final dims = mlKitReportedDims(frame);
+
+    if (faces.isEmpty) {
       return FaceFrameAnalysis(
-        faceCount: 1,
-        face: faces.first,
+        faceCount: 0,
+        message: 'Align your face inside the frame',
         imageWidth: dims.width,
         imageHeight: dims.height,
       );
-    });
+    }
+
+    final picked = EnrollmentFacePicker.pick(faces);
+    if (picked.face == null) {
+      if (kDebugMode && Platform.isAndroid) {
+        FaceRecognitionTrace.enrollmentDetect(
+          rawFaceCount: picked.rawCount,
+          usedFaceCount: 0,
+          ignoredSpurious: 0,
+          note: 'multiple_real_faces',
+        );
+      }
+      return FaceFrameAnalysis(
+        faceCount: picked.rawCount,
+        message: 'Only one person at a time',
+        imageWidth: dims.width,
+        imageHeight: dims.height,
+      );
+    }
+
+    if (kDebugMode &&
+        Platform.isAndroid &&
+        picked.rawCount > 1 &&
+        picked.ignoredSpurious > 0) {
+      FaceRecognitionTrace.enrollmentDetect(
+        rawFaceCount: picked.rawCount,
+        usedFaceCount: 1,
+        ignoredSpurious: picked.ignoredSpurious,
+        note: 'spurious_filtered',
+      );
+    }
+
+    return FaceFrameAnalysis(
+      faceCount: 1,
+      face: picked.face,
+      imageWidth: dims.width,
+      imageHeight: dims.height,
+    );
   }
 
   Future<void> close() async {

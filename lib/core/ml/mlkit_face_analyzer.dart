@@ -10,6 +10,9 @@ import 'package:attendance_kiosk_app/core/ml/camera_frame_clone.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
 import 'package:attendance_kiosk_app/core/ml/face_frame_analysis.dart';
 import 'package:attendance_kiosk_app/core/ml/face_ml_serial.dart';
+import 'package:attendance_kiosk_app/core/ml/android_ml_tuning.dart';
+import 'package:attendance_kiosk_app/core/ml/android_nv21_align.dart';
+import 'package:attendance_kiosk_app/core/ml/face_recognition_trace.dart';
 import 'package:attendance_kiosk_app/core/ml/face_quality_assessor.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_detector_factory.dart';
@@ -141,6 +144,7 @@ class MlKitFaceAnalyzer {
   Future<NeuralCaptureResult> captureForEnrollment({
     required CameraFrameClone clone,
     required Face face,
+    List<List<double>> priorEmbeddings = const [],
   }) async {
     if (_closed) {
       return const NeuralCaptureResult.failure('Analyzer closed');
@@ -149,7 +153,10 @@ class MlKitFaceAnalyzer {
     return _captureForEnrollmentAndroid(
       clone: clone,
       face: face,
-      minCropSharpness: Platform.isIOS ? 16 : 14,
+      minCropSharpness: Platform.isIOS
+          ? 16
+          : AndroidMlTuning.enrollmentMinCropSharpness,
+      priorEmbeddings: priorEmbeddings,
     );
   }
 
@@ -157,15 +164,18 @@ class MlKitFaceAnalyzer {
     required CameraFrameClone clone,
     required Face face,
     double minCropSharpness = 14,
+    List<List<double>> priorEmbeddings = const [],
   }) async {
-    if (!_enrollmentLandmarksReadyAndroid(face)) {
-      return const NeuralCaptureResult.failure(
-        'Show your full face — eyes and nose must be visible',
+    if (!_enrollmentLandmarksReadyAndroid(face, lenientPose: true)) {
+      return NeuralCaptureResult.failure(
+        Platform.isAndroid
+            ? 'Show your full face — keep eyes or nose visible'
+            : 'Show your full face — eyes and nose must be visible',
       );
     }
 
     final qaDims = mlKitReportedDims(clone.frame);
-    final pre = FaceQualityAssessor.preScreenEnrollment(
+    final pre = FaceQualityAssessor.preScreenGuidedPoseStep(
       face: face,
       frameWidth: qaDims.width,
       frameHeight: qaDims.height,
@@ -178,6 +188,7 @@ class MlKitFaceAnalyzer {
       clone: clone,
       face: face,
       minCropSharpness: minCropSharpness,
+      priorEmbeddings: priorEmbeddings,
     );
   }
 
@@ -185,6 +196,7 @@ class MlKitFaceAnalyzer {
     required CameraFrameClone clone,
     required Face face,
     required double? minCropSharpness,
+    List<List<double>> priorEmbeddings = const [],
   }) async {
     try {
       return await FaceMlEmbedSerial.runEnrollmentEmbed(() async {
@@ -193,16 +205,31 @@ class MlKitFaceAnalyzer {
             'Face recognition model not loaded',
           );
         }
-        final capture = await appFaceEmbedder.embedFromLiveFrame(
-          frame: clone.frame,
-          description: clone.description,
-          face: face,
-        );
+        final capture = Platform.isAndroid
+            ? await AndroidNv21AlignCalibrator.embedEnrollment(
+                frame: clone.frame,
+                description: clone.description,
+                face: face,
+                priorEmbeddings: priorEmbeddings,
+              )
+            : await appFaceEmbedder.embedFromLiveFrame(
+                frame: clone.frame,
+                description: clone.description,
+                face: face,
+              );
         if (capture == null) {
+          FaceRecognitionTrace.embeddingFailed(
+            phase: 'enrollment',
+            reason: 'aligned crop null',
+          );
           return const NeuralCaptureResult.failure(
             'Hold still — lighting or focus not clear enough',
           );
         }
+        FaceRecognitionTrace.embeddingGenerated(
+          phase: 'enrollment',
+          dim: capture.embedding.length,
+        );
         final cropQ = FaceQualityAssessor.assessCrop(
           capture.crop,
           minSharpnessThreshold: minCropSharpness,
@@ -224,11 +251,22 @@ class MlKitFaceAnalyzer {
   }
 
   /// Landmarks without contours (fast ML Kit stream on iOS/Android).
-  static bool _enrollmentLandmarksReadyAndroid(Face face) {
+  static bool _enrollmentLandmarksReadyAndroid(
+    Face face, {
+    bool lenientPose = false,
+  }) {
     final le = face.landmarks[FaceLandmarkType.leftEye];
     final re = face.landmarks[FaceLandmarkType.rightEye];
     final nose = face.landmarks[FaceLandmarkType.noseBase];
-    return le != null && re != null && nose != null;
+    if (!Platform.isAndroid) {
+      return le != null && re != null && nose != null;
+    }
+    if (lenientPose) {
+      final eulerOk =
+          face.headEulerAngleY != null && face.headEulerAngleX != null;
+      return eulerOk || nose != null || (le != null && re != null);
+    }
+    return le != null && re != null;
   }
 
   Future<NeuralCaptureResult> captureForRecognition({

@@ -1,17 +1,49 @@
 import 'dart:ui';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
+import 'package:attendance_kiosk_app/features/face_id/presentation/widgets/face_id_circular_camera_preview.dart';
 import 'package:attendance_kiosk_app/features/face_id/presentation/widgets/face_id_progress_ring.dart';
 
 enum FaceIdArrowDirection { left, right, up, down }
 
+/// Shared Face ID portal geometry (ring + circular camera cutout).
+class FaceIdPortalGeometry {
+  const FaceIdPortalGeometry({
+    required this.ringDiameter,
+    required this.portalDiameter,
+    required this.portalRadius,
+  });
+
+  final double ringDiameter;
+  final double portalDiameter;
+  final double portalRadius;
+
+  static FaceIdPortalGeometry forScreen(Size size, {double diameterOverride = 0}) {
+    final ringDiameter = FaceIdScannerOverlay.ringDiameterFor(
+      size,
+      override: diameterOverride,
+    );
+    // Portal sits flush inside the progress ring stroke.
+    const portalInset = 6.0;
+    final portalDiameter = ringDiameter - portalInset * 2;
+    return FaceIdPortalGeometry(
+      ringDiameter: ringDiameter,
+      portalDiameter: portalDiameter.clamp(260.0, size.shortestSide * 0.88),
+      portalRadius: (portalDiameter.clamp(260.0, size.shortestSide * 0.88)) / 2,
+    );
+  }
+}
+
 /// Premium Face ID overlay used by enrollment and recognition.
 ///
-/// Renders, in order: cinematic darken + radial vignette, circular "portal"
-/// cutout so the camera shows through, the segmented progress ring, and
-/// soft glass headers/footers for instructions.
+/// When [cameraController] is set (enrollment), the live camera is clipped to the
+/// circular portal only; header/footer stay on a black canvas.
+///
+/// When [cameraController] is set (enrollment + kiosk), the live feed is clipped
+/// to the circular portal; surrounding UI is black.
 class FaceIdScannerOverlay extends StatelessWidget {
   const FaceIdScannerOverlay({
     super.key,
@@ -26,8 +58,11 @@ class FaceIdScannerOverlay extends StatelessWidget {
     this.isLocked = false,
     this.faceDotOffset,
     this.arrowDirection,
+    this.highlightDirection = false,
     this.accentColor,
     this.showHeader = true,
+    this.cameraController,
+    this.cameraLoading = false,
   });
 
   final double ringProgress;
@@ -41,8 +76,15 @@ class FaceIdScannerOverlay extends StatelessWidget {
   final bool isLocked;
   final Offset? faceDotOffset;
   final FaceIdArrowDirection? arrowDirection;
+  final bool highlightDirection;
   final Color? accentColor;
   final bool showHeader;
+
+  /// When non-null, preview is rendered only inside the circular portal.
+  final CameraController? cameraController;
+
+  /// Shown in the portal while the camera is opening.
+  final bool cameraLoading;
 
   /// Face ID–style ring size: large on phones, scales on tablets.
   static double ringDiameterFor(Size size, {double override = 0}) {
@@ -55,76 +97,160 @@ class FaceIdScannerOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final size = media.size;
-    final shortest = size.shortestSide;
-    final ringSize = ringDiameterFor(size, override: diameter)
-        .clamp(300.0, shortest * 0.92);
-    final holeRadius = ringSize / 2 + 6;
+    final size = MediaQuery.sizeOf(context);
+    final geometry = FaceIdPortalGeometry.forScreen(size, diameterOverride: diameter);
     final accent = accentColor ??
         (isComplete || isLocked ? const Color(0xFF34C759) : Colors.white);
+    final portalOnly = cameraController != null || cameraLoading;
 
-    return IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          CustomPaint(
-            painter: _FaceIdDimMaskPainter(
-              holeRadius: holeRadius,
-              accent: accent,
-              isComplete: isComplete,
+    final content = SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          children: [
+            if (showHeader)
+              _GlassHeader(
+                title: headline,
+                subtitle: subtitle,
+              )
+            else
+              const SizedBox(height: 8),
+            Expanded(
+              child: _FaceIdPortalStage(
+                geometry: geometry,
+                accent: accent,
+                isComplete: isComplete,
+                portalOnly: portalOnly,
+                cameraController: cameraController,
+                cameraLoading: cameraLoading,
+                ringProgress: ringProgress,
+                isCapturing: isCapturing,
+                isLocked: isLocked,
+                faceDotOffset: faceDotOffset,
+                arrowDirection: arrowDirection,
+                highlightDirection: highlightDirection,
+              ),
             ),
-            child: const SizedBox.expand(),
+            _GuidanceBlock(
+              guidance: guidance,
+              detail: detail,
+              isComplete: isComplete,
+              accent: accent,
+            ),
+            const SizedBox(height: 18),
+          ],
+        ),
+      ),
+    );
+
+    return ColoredBox(
+      color: Colors.black,
+      child: IgnorePointer(child: content),
+    );
+  }
+}
+
+class _FaceIdPortalStage extends StatelessWidget {
+  const _FaceIdPortalStage({
+    required this.geometry,
+    required this.accent,
+    required this.isComplete,
+    required this.portalOnly,
+    required this.cameraController,
+    required this.cameraLoading,
+    required this.ringProgress,
+    required this.isCapturing,
+    required this.isLocked,
+    required this.faceDotOffset,
+    required this.arrowDirection,
+    required this.highlightDirection,
+  });
+
+  final FaceIdPortalGeometry geometry;
+  final Color accent;
+  final bool isComplete;
+  final bool portalOnly;
+  final CameraController? cameraController;
+  final bool cameraLoading;
+  final double ringProgress;
+  final bool isCapturing;
+  final bool isLocked;
+  final Offset? faceDotOffset;
+  final FaceIdArrowDirection? arrowDirection;
+  final bool highlightDirection;
+
+  @override
+  Widget build(BuildContext context) {
+    final portalSize = geometry.portalDiameter;
+
+    return Stack(
+      alignment: Alignment.center,
+      fit: StackFit.expand,
+      children: [
+        if (portalOnly) ...[
+          Center(
+            child: SizedBox(
+              width: portalSize,
+              height: portalSize,
+              child: ClipOval(
+                child: _portalCameraContent(),
+              ),
+            ),
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Column(
-                children: [
-                  if (showHeader)
-                    _GlassHeader(
-                      title: headline,
-                      subtitle: subtitle,
-                    )
-                  else
-                    const SizedBox(height: 8),
-                  const Spacer(),
-                  Center(
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        FaceIdProgressRing(
-                          progress: ringProgress,
-                          diameter: ringSize.toDouble(),
-                          isCapturing: isCapturing,
-                          isComplete: isComplete,
-                          isLocked: isLocked,
-                          faceDotOffset: faceDotOffset,
-                          ringColor: accent,
-                        ),
-                        if (arrowDirection != null && !isComplete && !isLocked)
-                          _DirectionalArrow(
-                            direction: arrowDirection!,
-                            color: accent,
-                          ),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  _GuidanceBlock(
-                    guidance: guidance,
-                    detail: detail,
-                    isComplete: isComplete,
-                    accent: accent,
-                  ),
-                  const SizedBox(height: 18),
-                ],
+          Center(
+            child: SizedBox(
+              width: portalSize,
+              height: portalSize,
+              child: CustomPaint(
+                painter: _FaceIdPortalRingPainter(
+                  accent: accent,
+                  isComplete: isComplete,
+                ),
               ),
             ),
           ),
         ],
-      ),
+        Center(
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              FaceIdProgressRing(
+                progress: ringProgress,
+                diameter: geometry.ringDiameter,
+                isCapturing: isCapturing,
+                isComplete: isComplete,
+                isLocked: isLocked,
+                faceDotOffset: faceDotOffset,
+                ringColor: accent,
+              ),
+              if (arrowDirection != null && !isComplete && !isLocked)
+                _DirectionalArrow(
+                  direction: arrowDirection!,
+                  color: highlightDirection
+                      ? const Color(0xFF34C759)
+                      : accent,
+                ),
+            ],
+          ),
+        ),
+      ],
     );
+  }
+
+  Widget _portalCameraContent() {
+    if (cameraController != null &&
+        cameraController!.value.isInitialized) {
+      return FaceIdCircularCameraPreview(controller: cameraController!);
+    }
+    if (cameraLoading) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: CircularProgressIndicator(color: Colors.white54),
+        ),
+      );
+    }
+    return const ColoredBox(color: Colors.black);
   }
 }
 
@@ -300,57 +426,41 @@ class _GuidanceBlock extends StatelessWidget {
   }
 }
 
-class _FaceIdDimMaskPainter extends CustomPainter {
-  _FaceIdDimMaskPainter({
-    required this.holeRadius,
+/// Subtle outer vignette around the enrollment portal (outside stays black).
+class _FaceIdPortalRingPainter extends CustomPainter {
+  _FaceIdPortalRingPainter({
     required this.accent,
     required this.isComplete,
   });
 
-  final double holeRadius;
   final Color accent;
   final bool isComplete;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide / 2;
 
-    // Premium dark gradient base.
-    final bg = Paint()
+    final vignette = Paint()
       ..shader = RadialGradient(
-        center: Alignment.center,
-        radius: 1.0,
         colors: [
-          Colors.black.withValues(alpha: 0.30),
-          Colors.black.withValues(alpha: 0.78),
+          Colors.transparent,
+          Colors.black.withValues(alpha: 0.35),
         ],
-        stops: const [0.45, 1.0],
-      ).createShader(Rect.fromLTWH(0, 0, size.width, size.height));
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bg);
+        stops: const [0.82, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: radius));
+    canvas.drawCircle(center, radius, vignette);
 
-    // Circular portal cutout (camera shows through).
-    final cutout = Path()
-      ..fillType = PathFillType.evenOdd
-      ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
-      ..addOval(Rect.fromCircle(center: center, radius: holeRadius));
-    canvas.drawPath(
-      cutout,
-      Paint()..color = Colors.black.withValues(alpha: 0.55),
-    );
-
-    // Subtle inner ring border around the portal.
     final border = Paint()
-      ..color = (isComplete ? accent : Colors.white).withValues(alpha: 0.10)
+      ..color = (isComplete ? accent : Colors.white).withValues(alpha: 0.12)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    canvas.drawCircle(center, holeRadius, border);
+      ..strokeWidth = 1.2;
+    canvas.drawCircle(center, radius - 0.6, border);
   }
 
   @override
-  bool shouldRepaint(covariant _FaceIdDimMaskPainter old) =>
-      old.holeRadius != holeRadius ||
-      old.accent != accent ||
-      old.isComplete != isComplete;
+  bool shouldRepaint(covariant _FaceIdPortalRingPainter old) =>
+      old.accent != accent || old.isComplete != isComplete;
 }
 
 /// Kiosk recognition overlay — animates a soft pulse while scanning, then
@@ -362,12 +472,16 @@ class FaceIdRecognitionOverlay extends StatefulWidget {
     this.isVerified = false,
     this.isScanning = true,
     this.subtitle,
+    this.cameraController,
+    this.cameraLoading = false,
   });
 
   final String status;
   final String? subtitle;
   final bool isVerified;
   final bool isScanning;
+  final CameraController? cameraController;
+  final bool cameraLoading;
 
   @override
   State<FaceIdRecognitionOverlay> createState() =>
@@ -404,11 +518,12 @@ class _FaceIdRecognitionOverlayState extends State<FaceIdRecognitionOverlay>
                 ? 0.10 + _pulse.value * 0.20
                 : 0.06;
         return FaceIdScannerOverlay(
+          cameraController: widget.cameraController,
+          cameraLoading: widget.cameraLoading,
           ringProgress: progress,
           headline: widget.isVerified
               ? FaceIdStrings.welcomeBack
               : FaceIdStrings.title,
-          subtitle: widget.subtitle,
           guidance: widget.status,
           isCapturing: widget.isScanning && !widget.isVerified,
           isComplete: widget.isVerified,

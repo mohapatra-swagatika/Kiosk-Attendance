@@ -15,7 +15,7 @@ class MlKitFaceDetectorFactory {
         enableContours: false,
         enableClassification: false,
         enableTracking: true,
-        minFaceSize: 0.10,
+        minFaceSize: Platform.isAndroid ? 0.12 : 0.10,
       );
 
   /// Android enrollment live stream — fast mode + tracking for fluid preview.
@@ -38,11 +38,12 @@ class MlKitFaceDetectorFactory {
         minFaceSize: 0.10,
       );
 
+  /// Android kiosk — fast mode + classification (landmarks + head pose for match).
   static FaceDetectorOptions androidKioskOptions() => FaceDetectorOptions(
         performanceMode: FaceDetectorMode.fast,
         enableLandmarks: true,
         enableContours: false,
-        enableClassification: false,
+        enableClassification: true,
         enableTracking: true,
         minFaceSize: 0.09,
       );

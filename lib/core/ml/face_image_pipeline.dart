@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 
 import 'package:attendance_kiosk_app/core/ml/face_align_geometry.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
+import 'package:attendance_kiosk_app/core/ml/android_nv21_align.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_detection_service.dart';
 
 /// Camera frame → RGB → canonical InsightFace-aligned 112×112 face crop.
@@ -69,21 +70,22 @@ class FaceImagePipeline {
     int? mlKitWidth,
     int? mlKitHeight,
     int outputSize = 112,
+    AndroidNv21AlignMode? androidAlign,
   }) {
     final resolved = geometry ?? (face != null ? FaceAlignGeometry.fromFace(face) : null);
     if (resolved == null) return null;
 
     final rgb = _liveFrameToRgb(frame);
     if (rgb == null) return null;
-    final dimsW = mlKitWidth ?? mlKitReportedDims(frame).width;
-    final dimsH = mlKitHeight ?? mlKitReportedDims(frame).height;
     return _canonicalAlign(
       rgb: rgb,
-      sourceWidth: dimsW,
-      sourceHeight: dimsH,
+      sourceWidth: mlKitWidth ?? mlKitReportedDims(frame).width,
+      sourceHeight: mlKitHeight ?? mlKitReportedDims(frame).height,
       description: description,
       geometry: resolved,
       outputSize: outputSize,
+      liveFrame: frame,
+      androidAlign: androidAlign,
     );
   }
 
@@ -96,28 +98,41 @@ class FaceImagePipeline {
     required CameraDescription description,
     required FaceAlignGeometry geometry,
     required int outputSize,
+    LiveCameraFrame? liveFrame,
+    AndroidNv21AlignMode? androidAlign,
   }) {
-    final oriented = _applyCameraRotation(rgb, description);
+    final oriented = _orientRgbForMlKit(
+      rgb: rgb,
+      description: description,
+      liveFrame: liveFrame,
+      androidAlign: androidAlign,
+    );
+    final mapW = oriented.width;
+    final mapH = oriented.height;
 
     final srcLe = _mapPoint(
       geometry.leftEyeX,
       geometry.leftEyeY,
-      sourceWidth,
-      sourceHeight,
+      mapW,
+      mapH,
       description,
+      liveFrame: liveFrame,
+      androidAlign: androidAlign,
     );
     final srcRe = _mapPoint(
       geometry.rightEyeX,
       geometry.rightEyeY,
-      sourceWidth,
-      sourceHeight,
+      mapW,
+      mapH,
       description,
+      liveFrame: liveFrame,
+      androidAlign: androidAlign,
     );
 
     final dx = srcRe.x - srcLe.x;
     final dy = srcRe.y - srcLe.y;
     final srcEyeDist = math.sqrt(dx * dx + dy * dy);
-    final minEyeDist = Platform.isAndroid ? 12.0 : 18.0;
+    final minEyeDist = Platform.isAndroid ? 15.0 : 18.0;
     if (srcEyeDist < minEyeDist) return null;
 
     // Target eye positions inside the output canvas.
@@ -285,8 +300,76 @@ class FaceImagePipeline {
           frame.bytesPerRow,
         );
       case LiveCameraImageFormat.nv21:
-        return _nv21BytesToRgb(frame.bytes, frame.width, frame.height);
+        return _nv21BytesToRgb(
+          frame.bytes,
+          frame.width,
+          frame.height,
+          bytesPerRow: frame.bytesPerRow,
+        );
     }
+  }
+
+  /// Android NV21 live frames: rotate RGB with the same [rotationDegrees] passed
+  /// to ML Kit so landmarks and pixels share one upright coordinate space.
+  /// iOS keeps the existing sensor-orientation path unchanged.
+  static bool _usesMlKitUprightLandmarks(LiveCameraFrame? frame) =>
+      Platform.isAndroid &&
+      frame != null &&
+      frame.format == LiveCameraImageFormat.nv21;
+
+  static img.Image _orientRgbForMlKit({
+    required img.Image rgb,
+    required CameraDescription description,
+    LiveCameraFrame? liveFrame,
+    AndroidNv21AlignMode? androidAlign,
+  }) {
+    if (_usesMlKitUprightLandmarks(liveFrame)) {
+      return _orientAndroidNv21Rgb(
+        rgb,
+        liveFrame!,
+        description: description,
+        mode: androidAlign ?? AndroidNv21AlignMode.rotWithFlip,
+      );
+    }
+    return _applyCameraRotation(rgb, description);
+  }
+
+  static int _effectiveRotationDegrees(int rotationDegrees, AndroidNv21AlignMode mode) {
+    final deg = rotationDegrees % 360;
+    return switch (mode) {
+      AndroidNv21AlignMode.rotWithFlip || AndroidNv21AlignMode.rotNoFlip => deg,
+      AndroidNv21AlignMode.invRotWithFlip || AndroidNv21AlignMode.invRotNoFlip =>
+        switch (deg) {
+          90 => 270,
+          270 => 90,
+          _ => deg,
+        },
+    };
+  }
+
+  static bool _modeUsesFrontFlip(AndroidNv21AlignMode mode) =>
+      mode == AndroidNv21AlignMode.rotWithFlip ||
+      mode == AndroidNv21AlignMode.invRotWithFlip;
+
+  /// Rotates NV21 RGB to match ML Kit upright landmarks; optional front mirror.
+  static img.Image _orientAndroidNv21Rgb(
+    img.Image rgb,
+    LiveCameraFrame frame, {
+    required CameraDescription description,
+    required AndroidNv21AlignMode mode,
+  }) {
+    final deg = _effectiveRotationDegrees(frame.rotationDegrees, mode);
+    var out = switch (deg) {
+      90 => img.copyRotate(rgb, angle: 90),
+      180 => img.copyRotate(rgb, angle: 180),
+      270 => img.copyRotate(rgb, angle: 270),
+      _ => rgb,
+    };
+    if (_modeUsesFrontFlip(mode) &&
+        description.lensDirection == CameraLensDirection.front) {
+      out = img.flipHorizontal(out);
+    }
+    return out;
   }
 
   static img.Image _bgraBytesToRgb(
@@ -307,12 +390,18 @@ class FaceImagePipeline {
     return out;
   }
 
-  static img.Image _nv21BytesToRgb(Uint8List y0, int w, int h) {
+  static img.Image _nv21BytesToRgb(
+    Uint8List y0,
+    int w,
+    int h, {
+    int? bytesPerRow,
+  }) {
+    final yStride = bytesPerRow ?? w;
     final out = img.Image(width: w, height: h);
     final ySize = w * h;
     for (var y = 0; y < h; y++) {
       for (var x = 0; x < w; x++) {
-        final yIndex = y * w + x;
+        final yIndex = y * yStride + x;
         if (yIndex >= y0.length) continue;
         final yVal = y0[yIndex] & 0xff;
         var uVal = 128;
@@ -466,16 +555,24 @@ class FaceImagePipeline {
     double y,
     int srcW,
     int srcH,
-    CameraDescription d,
-  ) {
+    CameraDescription d, {
+    LiveCameraFrame? liveFrame,
+    AndroidNv21AlignMode? androidAlign,
+  }) {
     var px = x;
     var py = y;
     final rot = d.sensorOrientation;
 
     if (Platform.isAndroid) {
-      // Landmarks are already in ML Kit upright space; [srcW/srcH] must be
-      // mlKitReportedDims (see alignedFaceCropFromLiveFrame). Mirror once to
-      // match the horizontal flip in `_applyCameraRotation`.
+      // Live NV21: landmarks match rotate+flip in [_orientAndroidNv21Rgb].
+      if (_usesMlKitUprightLandmarks(liveFrame)) {
+        final mode = androidAlign ?? AndroidNv21AlignMode.rotWithFlip;
+        if (_modeUsesFrontFlip(mode) &&
+            d.lensDirection == CameraLensDirection.front) {
+          px = srcW - px;
+        }
+        return _Point(px, py);
+      }
       if (d.lensDirection == CameraLensDirection.front) {
         px = srcW - px;
       }

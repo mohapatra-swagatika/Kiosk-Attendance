@@ -1,6 +1,10 @@
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+
+import 'package:attendance_kiosk_app/core/ml/face_enrollment_angles.dart';
+import 'package:attendance_kiosk_app/core/ml/face_portal_frame_gate.dart';
 import 'package:image/image.dart' as img;
 
 /// Production-grade frame quality gate for face recognition.
@@ -147,8 +151,9 @@ class FaceQualityAssessor {
       );
     }
 
-    final yaw = face.headEulerAngleY ?? 0;
-    final pitch = face.headEulerAngleX ?? 0;
+    final angles = FaceEnrollmentAngles.fromFace(face);
+    final yaw = angles.yaw;
+    final pitch = angles.pitch;
     final roll = face.headEulerAngleZ ?? 0;
     if (pitch.abs() > 35 || yaw.abs() > 50 || roll.abs() > 28) {
       return FaceQualityResult.fail(
@@ -175,6 +180,84 @@ class FaceQualityAssessor {
   }
 
   /// Minimal gates for kiosk unlock — speed over strict pose (registration is strict).
+  /// Android kiosk — size, landmarks, and euler pose (no classification required).
+  static FaceQualityResult preScreenKioskAndroid({
+    required Face face,
+    required int frameWidth,
+    required int frameHeight,
+  }) {
+    final instant = preScreenKioskInstant(
+      face: face,
+      frameWidth: frameWidth,
+      frameHeight: frameHeight,
+    );
+    if (!instant.passed) return instant;
+
+    final yaw = face.headEulerAngleY;
+    final pitch = face.headEulerAngleX;
+    final roll = face.headEulerAngleZ;
+    if (yaw == null && pitch == null && roll == null) {
+      return instant;
+    }
+    final y = yaw ?? 0;
+    final p = pitch ?? 0;
+    final r = roll ?? 0;
+    if (p.abs() > kioskMaxPitchAbs) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.poseBad,
+        'Tilt a little less — stay in the oval',
+      );
+    }
+    if (y.abs() > kioskMaxYawAbs) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.poseBad,
+        'Face the kiosk more directly',
+      );
+    }
+    if (r.abs() > kioskMaxRollAbs) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.poseBad,
+        'Hold your head straight',
+      );
+    }
+    return FaceQualityResult.ok(yaw: y, pitch: p, roll: r);
+  }
+
+  /// Guided pose steps (left/right/up/down) — face must be visible; do not
+  /// require both eyes (ML Kit often drops one eye landmark when the head tilts).
+  static FaceQualityResult preScreenGuidedPoseStep({
+    required Face face,
+    required int frameWidth,
+    required int frameHeight,
+  }) {
+    if (frameWidth <= 0 || frameHeight <= 0) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.partial,
+        'prescreen: invalid frame size',
+      );
+    }
+    final box = face.boundingBox;
+    final visibility = (box.width * box.height) / (frameWidth * frameHeight);
+    if (visibility < 0.05) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.tooSmall,
+        'prescreen: face too small (${(visibility * 100).toStringAsFixed(0)}%)',
+      );
+    }
+
+    final nose = face.landmarks[FaceLandmarkType.noseBase];
+    final le = face.landmarks[FaceLandmarkType.leftEye];
+    final re = face.landmarks[FaceLandmarkType.rightEye];
+    final eulerOk = face.headEulerAngleY != null && face.headEulerAngleX != null;
+    if (nose != null || (le != null && re != null) || eulerOk) {
+      return FaceQualityResult.ok();
+    }
+    return FaceQualityResult.fail(
+      FaceQualityIssue.partial,
+      'prescreen: need nose, both eyes, or head pose',
+    );
+  }
+
   static FaceQualityResult preScreenKioskInstant({
     required Face face,
     required int frameWidth,
@@ -194,6 +277,38 @@ class FaceQualityAssessor {
       return FaceQualityResult.fail(FaceQualityIssue.partial, '');
     }
     return FaceQualityResult.ok();
+  }
+
+  /// Kiosk portal UI — platform pre-check + face centered in the circle.
+  static FaceQualityResult preScreenKioskPortal({
+    required Face face,
+    required int frameWidth,
+    required int frameHeight,
+  }) {
+    final base = Platform.isAndroid
+        ? preScreenKioskInstant(
+            face: face,
+            frameWidth: frameWidth,
+            frameHeight: frameHeight,
+          )
+        : preScreenKiosk(
+            face: face,
+            frameWidth: frameWidth,
+            frameHeight: frameHeight,
+          );
+    if (!base.passed) return base;
+
+    if (!FacePortalFrameGate.faceInPortal(
+      face: face,
+      frameWidth: frameWidth,
+      frameHeight: frameHeight,
+    )) {
+      return FaceQualityResult.fail(
+        FaceQualityIssue.offCenter,
+        'Center your face in the circle',
+      );
+    }
+    return base;
   }
 
   /// Faster pre-check for kiosk (no crop blur). Balances speed vs quality.

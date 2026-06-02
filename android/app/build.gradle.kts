@@ -51,8 +51,18 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
+}
+
+dependencies {
+    // GpuDelegate (tensorflow-lite-gpu) references GpuDelegateFactory$Options from
+    // this artifact; without it R8 fails on release builds (tflite_flutter 0.11.x).
+    implementation("org.tensorflow:tensorflow-lite-gpu-api:2.11.0")
 }
 
 flutter {

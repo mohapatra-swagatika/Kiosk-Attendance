@@ -28,6 +28,9 @@ class CameraRuntime {
 
   /// Kiosk ML Kit: every Nth frame runs full detect (reuse cache between).
   static int get kioskDetectEveryNFrames {
+    // Match iOS cadence — every-frame detect on Android overloaded the serial ML
+    // queue and produced empty/stale face analysis on mid-range devices.
+    // Every frame on Android — stale cached landmarks on off-frames broke embed alignment.
     if (Platform.isAndroid) return 1;
     return isTabletLayout ? 3 : 2;
   }
@@ -47,7 +50,7 @@ class CameraRuntime {
           : const Duration(milliseconds: 180);
     }
     if (Platform.isAndroid) {
-      return const Duration(milliseconds: 220);
+      return const Duration(milliseconds: 280);
     }
     return isTabletLayout
         ? const Duration(milliseconds: 400)
@@ -56,7 +59,7 @@ class CameraRuntime {
 
   static Duration enrollmentPreviewDelay() {
     if (Platform.isAndroid) {
-      return const Duration(milliseconds: 80);
+      return const Duration(milliseconds: 100);
     }
     return isTabletLayout
         ? const Duration(milliseconds: 120)
@@ -66,7 +69,7 @@ class CameraRuntime {
   /// Min gap between enrollment ML passes (tablet slightly slower).
   static Duration get enrollmentDetectInterval {
     if (Platform.isAndroid) {
-      return const Duration(milliseconds: 72);
+      return const Duration(milliseconds: 66);
     }
     return isTabletLayout
         ? const Duration(milliseconds: 160)

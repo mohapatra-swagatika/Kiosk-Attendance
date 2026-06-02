@@ -46,6 +46,8 @@ class FaceIdLiveMetrics {
     int frameHeight = 0,
     double? smoothedCenterX,
     double? smoothedCenterY,
+    /// Mirror X for front-camera preview (Android enrollment).
+    bool mirrorPreviewX = false,
   }) {
     if (!analysis.hasSingleFace || analysis.face == null) {
       if (analysis.faceCount > 1) {
@@ -95,13 +97,16 @@ class FaceIdLiveMetrics {
       stabilityScore = (1 - shift * 8).clamp(0.0, 1.0);
     }
 
-    final normX = ((cx - fw / 2) / (fw / 2)).clamp(-1.0, 1.0);
+    final normXRaw = ((cx - fw / 2) / (fw / 2)).clamp(-1.0, 1.0);
     final normY = ((cy - fh / 2) / (fh / 2)).clamp(-1.0, 1.0);
+    // Mirror only the on-ring dot so it matches the mirrored preview. Guidance text
+    // should use the ML frame direction (otherwise "move left/right" gets inverted).
+    final normXForDot = mirrorPreviewX ? -normXRaw : normXRaw;
 
     String guidance;
     if (centerScore < 0.50) {
-      guidance = normX.abs() > normY.abs()
-          ? (normX > 0 ? 'Move slightly left' : 'Move slightly right')
+      guidance = normXRaw.abs() > normY.abs()
+          ? (normXRaw > 0 ? 'Move slightly left' : 'Move slightly right')
           : (normY > 0 ? 'Move slightly up' : 'Move slightly down');
     } else if (distanceScore < 0.45) {
       guidance =
@@ -123,7 +128,7 @@ class FaceIdLiveMetrics {
       stabilityScore: stabilityScore,
       isWellAligned: isWellAligned,
       guidance: guidance,
-      faceOffsetNormalized: Offset(normX, normY),
+      faceOffsetNormalized: Offset(normXForDot, normY),
     );
   }
 }

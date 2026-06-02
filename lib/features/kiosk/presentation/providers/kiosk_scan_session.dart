@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:attendance_kiosk_app/core/ml/android_ml_tuning.dart';
 import 'package:attendance_kiosk_app/core/ml/face_embedding_codec.dart';
 
 /// Cooldown, face tracking, and throttling for instant kiosk unlock scanning.
@@ -24,7 +25,7 @@ class KioskScanSession extends Notifier<KioskScanState> {
       ? const Duration(milliseconds: 40)
       : const Duration(milliseconds: 48);
 
-  /// Default unknown reads before popup.
+  /// Default unknown reads before popup (Android uses [AndroidMlTuning] via [_requiredUnknownStreak]).
   static const int unknownStreakRequired = 1;
 
   /// After a match, still require only 1–2 reads for unknown (not 12).
@@ -40,8 +41,10 @@ class KioskScanSession extends Notifier<KioskScanState> {
   static const double minConfirmMargin = 0.08;
 
   /// Reject confirm streak when head pose jumps between frames.
-  static const double maxConfirmYawDelta = 12;
-  static const double maxConfirmPitchDelta = 10;
+  static double get maxConfirmYawDelta =>
+      Platform.isAndroid ? 20 : 12;
+  static double get maxConfirmPitchDelta =>
+      Platform.isAndroid ? 14 : 10;
 
   /// EMA smoothing for match confidence (reduces one-frame false accepts).
   static const double _matchConfidenceEmaAlpha = 0.5;
@@ -106,6 +109,25 @@ class KioskScanSession extends Notifier<KioskScanState> {
     state = state.copyWith(activeTrackingId: trackingId);
   }
 
+  int _matchConfirmFramesNeeded(double confidence) {
+    if (!Platform.isAndroid) {
+      return confidence >= borderlineMatchConfidence
+          ? matchConfirmFramesDefault
+          : matchConfirmFramesBorderline;
+    }
+    if (confidence >= AndroidMlTuning.kioskInstantConfirmScore) return 1;
+    if (confidence >= FaceEmbeddingCodec.effectiveInstantMatchConfidence) {
+      return 2;
+    }
+    return 3;
+  }
+
+  int get matchConfirmStreakCount => state.matchConfirmStreak;
+
+  int get unknownStreakCount => state.unknownStreak;
+
+  String? get pendingEmployeeIdValue => state.pendingEmployeeId;
+
   bool registerMatchCandidate(
     String employeeId, {
     required double confidence,
@@ -113,13 +135,27 @@ class KioskScanSession extends Notifier<KioskScanState> {
     double? yaw,
     double? pitch,
   }) {
-    if (confidence < FaceEmbeddingCodec.instantMatchConfidence) {
+    if (confidence < FaceEmbeddingCodec.effectiveInstantMatchConfidence) {
       _resetMatchConfirmState();
       return false;
     }
     if (margin < minConfirmMargin && confidence < 0.92) {
       _resetMatchConfirmState();
       return false;
+    }
+
+    if (Platform.isAndroid &&
+        confidence >= AndroidMlTuning.kioskInstantConfirmScore &&
+        margin >= AndroidMlTuning.kioskInstantConfirmMargin) {
+      state = state.copyWith(
+        pendingEmployeeId: employeeId,
+        matchConfirmStreak: 2,
+        unknownStreak: 0,
+        noFaceStreak: 0,
+      );
+      _matchConfidenceEma = confidence;
+      _activateLock(employeeId);
+      return true;
     }
 
     final pending = state.pendingEmployeeId;
@@ -152,12 +188,10 @@ class KioskScanSession extends Notifier<KioskScanState> {
       noFaceStreak: 0,
     );
 
-    final framesNeeded = smoothed >= borderlineMatchConfidence
-        ? matchConfirmFramesDefault
-        : matchConfirmFramesBorderline;
+    final framesNeeded = _matchConfirmFramesNeeded(smoothed);
     final confirmed = streak >= framesNeeded &&
-        smoothed >= FaceEmbeddingCodec.instantMatchConfidence &&
-        confidence >= FaceEmbeddingCodec.instantMatchConfidence;
+        smoothed >= FaceEmbeddingCodec.effectiveInstantMatchConfidence &&
+        confidence >= FaceEmbeddingCodec.effectiveInstantMatchConfidence;
     if (confirmed) {
       _activateLock(employeeId);
     }
@@ -196,6 +230,14 @@ class KioskScanSession extends Notifier<KioskScanState> {
   }
 
   int requiredUnknownStreakForScore(double bestScore) {
+    if (Platform.isAndroid) {
+      if (bestScore < 0.55) return AndroidMlTuning.kioskUnknownStreakNear;
+      if (bestScore < 0.68) return AndroidMlTuning.kioskUnknownStreakWeak;
+      if (bestScore < FaceEmbeddingCodec.effectiveMatchThreshold) {
+        return AndroidMlTuning.kioskUnknownStreakMid;
+      }
+      return 1;
+    }
     if (bestScore < FaceEmbeddingCodec.clearlyUnknownMaxScore) return 1;
     if (bestScore >= FaceEmbeddingCodec.unknownPopupMinScore) return 1;
     return _requiredUnknownStreak();
@@ -272,6 +314,16 @@ class KioskScanSession extends Notifier<KioskScanState> {
       if (last != null &&
           bestEmployeeId == last &&
           bestScore >= FaceEmbeddingCodec.lockMaintainThresholdTflite) {
+        return true;
+      }
+    }
+
+    if (Platform.isAndroid) {
+      final pending = state.pendingEmployeeId;
+      if (pending != null &&
+          state.matchConfirmStreak >= 1 &&
+          bestEmployeeId == pending &&
+          bestScore >= 0.68) {
         return true;
       }
     }

@@ -1,6 +1,8 @@
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 import 'dart:math' show Point;
 
+import 'package:attendance_kiosk_app/core/ml/android_ml_tuning.dart';
 import 'package:attendance_kiosk_app/core/ml/face_match_debug_log.dart';
 import 'package:attendance_kiosk_app/core/ml/face_profile_poses.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
@@ -133,6 +135,31 @@ class FaceEmbeddingCodec {
   static int get storageVersion => storageVersionTflite;
   static double get matchThreshold =>
       _mode == FaceEmbeddingMode.tflite ? matchThresholdTflite : matchThresholdContour;
+
+  /// Platform-aware kiosk match bar (Android NV21 is slightly lower; iOS unchanged).
+  static double get effectiveMatchThreshold {
+    if (Platform.isAndroid && _mode == FaceEmbeddingMode.tflite) {
+      return AndroidMlTuning.kioskMatchThreshold;
+    }
+    return matchThreshold;
+  }
+
+  static double get effectiveMatchThresholdLocked {
+    if (Platform.isAndroid && _mode == FaceEmbeddingMode.tflite) {
+      return AndroidMlTuning.kioskMatchThresholdLocked;
+    }
+    return matchThresholdTfliteLocked;
+  }
+
+  static double get effectiveAnchorMin {
+    if (Platform.isAndroid && _mode == FaceEmbeddingMode.tflite) {
+      return AndroidMlTuning.kioskAnchorMin;
+    }
+    return variationAnchorMinTflite;
+  }
+
+  /// UI / confirm streak (kiosk scan session).
+  static double get effectiveInstantMatchConfidence => effectiveMatchThreshold;
   static double get matchMarginMin =>
       _mode == FaceEmbeddingMode.tflite ? matchMarginMinTflite : matchMarginMinContour;
 
@@ -371,10 +398,13 @@ class FaceEmbeddingCodec {
   static bool isEnrollmentSampleConsistent({
     required List<double> candidate,
     required List<List<double>> existing,
-    double minSimilarityToAny = 0.48,
-    double rejectBelow = 0.38,
+    double? minSimilarityToAny,
+    double? rejectBelow,
   }) {
     if (existing.isEmpty) return true;
+    minSimilarityToAny ??=
+        Platform.isAndroid ? 0.36 : 0.48;
+    rejectBelow ??= Platform.isAndroid ? 0.28 : 0.38;
     if (candidate.length != existing.first.length) return false;
     var maxToAny = 0.0;
     for (final e in existing) {
@@ -575,10 +605,11 @@ class FaceEmbeddingCodec {
 
     final isTfliteMode = _mode == FaceEmbeddingMode.tflite;
     final reqMargin = requiredMatchMargin(best.value);
-    final wouldPassThreshold = best.value >= matchThreshold;
+    final matchThr = effectiveMatchThreshold;
+    final anchorMin = effectiveAnchorMin;
+    final wouldPassThreshold = best.value >= matchThr;
     final wouldPassMargin = margin >= reqMargin;
-    final wouldPassAnchor =
-        !isTfliteMode || bestAnchor >= variationAnchorMinTflite;
+    final wouldPassAnchor = !isTfliteMode || bestAnchor >= anchorMin;
     final wouldPassClearWinner = isTfliteMode &&
         best.value >= clearWinnerScoreTflite &&
         margin >= clearWinnerMarginTflite;
@@ -600,12 +631,12 @@ class FaceEmbeddingCodec {
           .map((e) => e.value);
       final secondOther = others.isEmpty ? 0.0 : others.reduce(math.max);
       final lockedMargin = lockedScore - secondOther;
-      if (lockedScore >= matchThresholdTfliteLocked &&
+      if (lockedScore >= effectiveMatchThresholdLocked &&
           lockedMargin >= matchMarginMinTfliteLocked) {
         final lockProfile = gallery[lockedEmployeeId]!;
         final lockAnchor = identityAnchorScore(probe, lockProfile);
-        final anchorOk = !isTfliteMode ||
-            lockAnchor >= variationAnchorMinTflite - 0.02;
+        final anchorOk =
+            !isTfliteMode || lockAnchor >= effectiveAnchorMin - 0.02;
         if (anchorOk) {
           return FaceMatchOutcome(
             employeeId: lockedEmployeeId,
@@ -620,7 +651,7 @@ class FaceEmbeddingCodec {
 
     final clearWinner = wouldPassClearWinner;
 
-    if (isTfliteMode && bestAnchor < variationAnchorMinTflite) {
+    if (isTfliteMode && bestAnchor < anchorMin) {
       return FaceMatchOutcome(
         rejected: true,
         reason: 'Unknown face',
@@ -642,7 +673,7 @@ class FaceEmbeddingCodec {
       );
     }
 
-    if (best.value < matchThreshold && !clearWinner) {
+    if (best.value < matchThr && !clearWinner) {
       return FaceMatchOutcome(
         rejected: true,
         reason: 'Unknown face',

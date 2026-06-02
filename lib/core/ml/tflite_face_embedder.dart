@@ -7,6 +7,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
+import 'package:attendance_kiosk_app/core/ml/android_nv21_align.dart';
 import 'package:attendance_kiosk_app/core/ml/face_detection_port.dart';
 import 'package:attendance_kiosk_app/core/ml/face_image_pipeline.dart';
 import 'package:attendance_kiosk_app/core/ml/face_match_debug_log.dart';
@@ -126,6 +127,7 @@ class TfliteFaceEmbedder {
     required LiveCameraFrame frame,
     required CameraDescription description,
     required Face face,
+    AndroidNv21AlignMode? androidAlign,
   }) async {
     if (!isReady) return null;
 
@@ -134,6 +136,7 @@ class TfliteFaceEmbedder {
       description: description,
       face: face,
       outputSize: _inputSize,
+      androidAlign: androidAlign,
     );
     return await _embedFromCrop(crop);
   }

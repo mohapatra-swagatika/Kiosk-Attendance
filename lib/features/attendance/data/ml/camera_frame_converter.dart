@@ -29,14 +29,14 @@ LiveCameraFrame? liveFrameFromCameraImage({
     }
     if (image.planes.length >= 3) {
       final nv21 = yuv420888ToNv21(image);
-      final yStride = image.planes[0].bytesPerRow;
       return LiveCameraFrame(
         bytes: nv21,
         width: image.width,
         height: image.height,
         rotationDegrees: rotation,
         format: LiveCameraImageFormat.nv21,
-        bytesPerRow: yStride,
+        // Packed NV21 from [yuv420888ToNv21] — row stride equals width.
+        bytesPerRow: image.width,
       );
     }
     return null;
@@ -59,17 +59,23 @@ int rotationDegreesForInputImage({
   required CameraDescription description,
   required DeviceOrientation deviceOrientation,
 }) {
-  var rotation = description.sensorOrientation;
-  if (description.lensDirection == CameraLensDirection.front) {
-    rotation = (360 - rotation) % 360;
-  }
   final deviceDegrees = switch (deviceOrientation) {
     DeviceOrientation.portraitUp => 0,
     DeviceOrientation.landscapeLeft => 90,
     DeviceOrientation.portraitDown => 180,
     DeviceOrientation.landscapeRight => 270,
   };
-  return (rotation + deviceDegrees) % 360;
+  final sensor = description.sensorOrientation;
+
+  // ML Kit expects the rotation needed to make the image upright.
+  // Standard mapping:
+  // - back camera:  (sensor - device + 360) % 360
+  // - front camera: (sensor + device) % 360
+  // This keeps face bounding boxes and Euler angles stable across devices.
+  if (description.lensDirection == CameraLensDirection.front) {
+    return (sensor + deviceDegrees) % 360;
+  }
+  return (sensor - deviceDegrees + 360) % 360;
 }
 
 /// Converts Android YUV_420_888 [CameraImage] to NV21 for ML Kit.

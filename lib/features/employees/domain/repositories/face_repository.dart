@@ -26,6 +26,9 @@ abstract class FaceRepository {
   /// Count of on-device face profiles in the in-memory gallery (0 before preload).
   int get enrolledFaceCount;
 
+  /// In-memory gallery after [preloadGallery] (empty if not loaded).
+  Map<String, Map<String, dynamic>> get gallerySnapshot;
+
   /// Clears the in-memory gallery (call after enroll / reset).
   void invalidateGalleryCache();
 

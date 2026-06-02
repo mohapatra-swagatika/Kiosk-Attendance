@@ -17,7 +17,9 @@ import 'package:attendance_kiosk_app/core/camera/camera_session_helper.dart';
 import 'package:attendance_kiosk_app/core/localization/app_strings.dart';
 import 'package:attendance_kiosk_app/core/ml/camera_frame_clone.dart';
 import 'package:attendance_kiosk_app/core/ml/face_id_live_metrics.dart';
+import 'package:attendance_kiosk_app/core/ml/android_nv21_align.dart';
 import 'package:attendance_kiosk_app/core/ml/face_registration_session.dart';
+import 'package:attendance_kiosk_app/core/ml/face_recognition_trace.dart';
 import 'package:attendance_kiosk_app/core/ml/face_track_smoother.dart';
 import 'package:attendance_kiosk_app/core/ml/mlkit_face_analyzer.dart';
 import 'package:attendance_kiosk_app/core/errors/failures.dart';
@@ -56,6 +58,7 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
   bool _enrollmentComplete = false;
 
   FaceIdEnrollPhase _lastPhase = FaceIdEnrollPhase.positioning;
+  FaceIdGuidedStep _lastGuidedStep = FaceIdGuidedStep.straight;
   DateTime _lastMlAt = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime? _mlStreamStartedAt;
   bool _mlKitPrimed = false;
@@ -83,14 +86,8 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     _framePipeline.submit(image: image, processor: _processFrame);
   }
 
-  /// Face-position dot for the ring overlay (iOS only).
-  ///
-  /// On Android the front-camera preview is mirrored but ML Kit coordinates are
-  /// not, so the dot moves opposite to the face and feels like you must chase
-  /// it around the circle. Registration only needs your face in the portal —
-  /// text guidance is enough on Android.
+  /// Face-position dot for the ring overlay (mirrored on Android for preview).
   Offset? _faceDotForOverlay(FaceIdLiveMetrics metrics) {
-    if (Platform.isAndroid) return null;
     final raw = metrics.faceOffsetNormalized;
     if (raw == null || !metrics.hasFace) {
       _smoothedFaceDot = null;
@@ -109,6 +106,8 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
   @override
   void initState() {
     super.initState();
+    AndroidNv21AlignCalibrator.resetEnrollment();
+    _session.resetForNewEnrollment();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _uiTicker = createTicker(_onUiTick)..start();
     _resolveEmployeeDisplayName();
@@ -343,6 +342,12 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
         smoothedCenterY: smoothCy,
       );
       _emitPhaseFeedback();
+      if (Platform.isAndroid &&
+          _session.guidedStep != _lastGuidedStep &&
+          _session.phase == FaceIdEnrollPhase.scanning) {
+        _lastGuidedStep = _session.guidedStep;
+        unawaited(HapticFeedback.selectionClick());
+      }
 
       if (mounted) {
         setState(() {
@@ -389,7 +394,11 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
     _session.markCaptureStarted();
     try {
       final capture = await _analyzer
-          .captureForEnrollment(clone: clone, face: face)
+          .captureForEnrollment(
+            clone: clone,
+            face: face,
+            priorEmbeddings: _session.captureEmbeddings,
+          )
           .timeout(
             const Duration(seconds: 3),
             onTimeout: () => const NeuralCaptureResult.failure(
@@ -399,9 +408,9 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
 
       final ok = capture.ok && capture.embedding != null;
       _session.markCaptureFinished(success: ok, embedding: capture.embedding);
-      if (ok) {
+      if (ok && !Platform.isAndroid) {
         unawaited(HapticFeedback.selectionClick());
-      } else if (mounted && capture.message != null) {
+      } else if (mounted && capture.message != null && !Platform.isAndroid) {
         setState(() {
           _detail = capture.message;
         });
@@ -439,6 +448,14 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       return;
     }
 
+    final sampleCount = (profile['samples'] as num?)?.toInt() ?? 0;
+    final yawSpread = (profile['yawSpread'] as num?)?.toDouble() ?? 0;
+    FaceRecognitionTrace.registrationCompleted(
+      employeeId: widget.employeeId,
+      sampleCount: sampleCount,
+      yawSpread: yawSpread,
+    );
+
     final result = await ref
         .read(faceRepositoryProvider)
         .registerFaceProfile(employeeId: widget.employeeId, profile: profile);
@@ -463,6 +480,9 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
         ref.invalidate(employeeHasFaceEmbeddingProvider(widget.employeeId));
         ref.invalidate(faceDataSyncPendingCountProvider);
         ref.invalidate(offlineSyncPendingCountProvider);
+        // Kiosk panel may have cached enrolledCount=0 from before this enroll.
+        ref.read(faceRepositoryProvider).invalidateGalleryCache();
+        unawaited(ref.read(faceRepositoryProvider).preloadGallery());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -540,14 +560,10 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (_camera != null)
-            CameraPreview(_camera!)
-          else
-            const Center(
-              child: CircularProgressIndicator(color: Colors.white54),
-            ),
           if (!_blocked)
             FaceIdScannerOverlay(
+              cameraController: _camera,
+              cameraLoading: _camera == null,
               ringProgress: _enrollmentComplete ? 1.0 : ringProgress,
               headline: FaceRegistrationStrings.faceIdTitle,
               subtitle: subtitle,
@@ -556,15 +572,27 @@ class _FaceRegistrationPageState extends ConsumerState<FaceRegistrationPage>
               isCapturing: _session.phase == FaceIdEnrollPhase.scanning,
               isComplete: _enrollmentComplete,
               faceDotOffset: _faceDotForOverlay(metrics),
+              // Android front camera preview is mirrored; keep pose validation as-is,
+              // but flip the on-screen arrow so the *user action* matches what they see.
               arrowDirection: switch (_session.guidedStep) {
-                FaceIdGuidedStep.left => FaceIdArrowDirection.left,
-                FaceIdGuidedStep.right => FaceIdArrowDirection.right,
-                FaceIdGuidedStep.up => FaceIdArrowDirection.up,
-                FaceIdGuidedStep.down => FaceIdArrowDirection.down,
+                FaceIdGuidedStep.left => Platform.isAndroid
+                    ? FaceIdArrowDirection.right
+                    : FaceIdArrowDirection.left,
+                FaceIdGuidedStep.right => Platform.isAndroid
+                    ? FaceIdArrowDirection.left
+                    : FaceIdArrowDirection.right,
+                FaceIdGuidedStep.up => Platform.isAndroid
+                    ? FaceIdArrowDirection.down
+                    : FaceIdArrowDirection.up,
+                FaceIdGuidedStep.down => Platform.isAndroid
+                    ? FaceIdArrowDirection.up
+                    : FaceIdArrowDirection.down,
                 _ => null,
               },
-            ),
-          if (_blocked)
+              highlightDirection:
+                  Platform.isAndroid && _session.guidedPoseInTarget,
+            )
+          else
             FaceIdScannerOverlay(
               ringProgress: 0,
               headline: _blockedTitle ?? FaceRegistrationStrings.unavailable,

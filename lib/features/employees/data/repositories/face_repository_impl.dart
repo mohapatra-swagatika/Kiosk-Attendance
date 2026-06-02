@@ -6,6 +6,7 @@ import 'package:attendance_kiosk_app/core/errors/failures.dart';
 import 'package:attendance_kiosk_app/core/ml/face_embedding_codec.dart';
 import 'package:attendance_kiosk_app/core/ml/face_profile_poses.dart';
 import 'package:attendance_kiosk_app/core/ml/face_match_debug_log.dart';
+import 'package:attendance_kiosk_app/core/ml/face_recognition_trace.dart';
 import 'package:attendance_kiosk_app/core/api/employee_snapshot_parser.dart';
 import 'package:attendance_kiosk_app/core/api/face_profile_parser.dart';
 import 'package:attendance_kiosk_app/features/employees/domain/entities/employee.dart';
@@ -33,6 +34,10 @@ class FaceRepositoryImpl implements FaceRepository {
   int get enrolledFaceCount => _galleryCache?.length ?? 0;
 
   @override
+  Map<String, Map<String, dynamic>> get gallerySnapshot =>
+      Map<String, Map<String, dynamic>>.from(_galleryCache ?? const {});
+
+  @override
   void invalidateGalleryCache() {
     _galleryCache = null;
     _emptyGalleryMatchLogged = false;
@@ -42,6 +47,10 @@ class FaceRepositoryImpl implements FaceRepository {
   Future<Either<Failure, int>> preloadGallery() async {
     try {
       final gallery = await _loadGallery(forceRefresh: true);
+      FaceRecognitionTrace.galleryLoaded(
+        count: gallery.length,
+        employeeIds: gallery.keys.toList(),
+      );
       if (kDebugMode) {
         debugPrint('FaceRepository: gallery preloaded (${gallery.length} profiles)');
       }
@@ -121,6 +130,16 @@ class FaceRepositoryImpl implements FaceRepository {
         ..[employeeId] = profile;
       await _profiles.writeGallery(updated);
       _galleryCache = updated;
+      var diskVerified = false;
+      if (kDebugMode) {
+        final readBack = await _profiles.readGallery();
+        diskVerified = readBack.containsKey(employeeId);
+      }
+      FaceRecognitionTrace.profileSaved(
+        employeeId: employeeId,
+        profile: profile,
+        diskVerified: diskVerified,
+      );
       if (kDebugMode) {
         debugPrint('FaceRepository: registered $employeeId (on-device)');
       }
@@ -273,6 +292,18 @@ class FaceRepositoryImpl implements FaceRepository {
       outcome.rejected
           ? 'RESULT: rejected — ${outcome.reason} (best=${outcome.bestScore.toStringAsFixed(4)})'
           : 'RESULT: matched ${outcome.employeeId} conf=${outcome.confidence.toStringAsFixed(4)}',
+    );
+    FaceRecognitionTrace.similarityScores(
+      probe: probe,
+      gallery: gallery,
+      force: outcome.rejected,
+    );
+    FaceRecognitionTrace.matchVerdict(
+      accepted: !outcome.rejected && outcome.employeeId != null,
+      employeeId: outcome.employeeId ?? outcome.bestEmployeeId ?? '?',
+      bestScore: outcome.bestScore,
+      margin: outcome.margin,
+      reason: outcome.reason ?? (outcome.rejected ? 'rejected' : 'matched'),
     );
     return outcome;
   }

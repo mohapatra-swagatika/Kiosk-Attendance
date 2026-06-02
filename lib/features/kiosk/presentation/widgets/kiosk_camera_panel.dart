@@ -179,8 +179,26 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
       return;
     }
 
-    // Empty gallery: no recognition work (preview-only).
-    if (_galleryCount == 0) return;
+    // Use live gallery size (stale [_galleryCount] breaks matching after enroll).
+    var enrolledCount = ref.read(faceRepositoryProvider).enrolledFaceCount;
+    if (enrolledCount == 0) {
+      // Cache cleared after enroll — reload once so kiosk ML is not stuck off.
+      unawaited(
+        ref.read(faceRepositoryProvider).preloadGallery().then((either) {
+          either.fold((_) {}, (count) {
+            if (mounted && count > 0) {
+              _galleryCount = count;
+              _ui.setReady(enrolledCount: count);
+              _scheduleUiRebuild();
+            }
+          });
+        }),
+      );
+      return;
+    }
+    if (enrolledCount != _galleryCount) {
+      _galleryCount = enrolledCount;
+    }
 
     final session = ref.read(kioskScanSessionProvider.notifier);
     final tick = await pipeline.processFrame(
@@ -291,20 +309,13 @@ class _KioskCameraPanelState extends ConsumerState<KioskCameraPanel>
     final snap = _ui.snapshot;
     return ColoredBox(
       color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (_camera != null)
-            CameraPreview(_camera!)
-          else
-            const Center(child: CircularProgressIndicator(color: Colors.white54)),
-          FaceIdRecognitionOverlay(
-            status: snap.message,
-            subtitle: snap.subtitle,
-            isVerified: snap.isVerified,
-            isScanning: snap.isScanning && _galleryCount > 0,
-          ),
-        ],
+      child: FaceIdRecognitionOverlay(
+        cameraController: _camera,
+        cameraLoading: _camera == null,
+        status: snap.message,
+        subtitle: snap.subtitle,
+        isVerified: snap.isVerified,
+        isScanning: snap.isScanning && _galleryCount > 0,
       ),
     );
   }
